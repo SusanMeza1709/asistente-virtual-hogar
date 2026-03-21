@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Asistente Virtual de Hogar - Voz</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 24px;
+      max-width: 760px;
+      margin-inline: auto;
+      line-height: 1.4;
+    }
+    h1 { margin-top: 0; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+    button {
+      border: 1px solid #777;
+      background: transparent;
+      padding: 10px 14px;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    textarea {
+      width: 100%;
+      min-height: 110px;
+      padding: 10px;
+      border-radius: 8px;
+      border: 1px solid #777;
+      margin-bottom: 12px;
+      font-family: inherit;
+    }
+    .card {
+      border: 1px solid #777;
+      border-radius: 10px;
+      padding: 12px;
+      white-space: pre-wrap;
+    }
+    .history {
+      border: 1px solid #777;
+      border-radius: 10px;
+      padding: 12px;
+      min-height: 140px;
+      max-height: 340px;
+      overflow-y: auto;
+      margin-top: 8px;
+      white-space: pre-wrap;
+    }
+    .history-item { margin-bottom: 10px; }
+    .meta { opacity: 0.75; font-size: 12px; }
+    .hint { opacity: 0.8; margin-bottom: 10px; }
+  </style>
+</head>
+<body>
+  <h1>Asistente Virtual de Hogar (Voz)</h1>
+  <p class="hint">Haz clic en "Escuchar" y habla. También puedes escribir y enviar manualmente.</p>
+
+  <div class="row">
+    <button id="listenBtn">Escuchar</button>
+    <button id="stopBtn">Detener</button>
+    <button id="sendBtn">Enviar texto</button>
+    <button id="repeatBtn">Repetir respuesta</button>
+    <button id="clearBtn">Limpiar historial</button>
+  </div>
+
+  <label for="userText">Tu mensaje:</label>
+  <textarea id="userText" placeholder="Ejemplo: comprar 2 Leche"></textarea>
+
+  <h3>Respuesta</h3>
+  <div id="reply" class="card">Aquí aparecerá la respuesta.</div>
+
+  <h3>Historial</h3>
+  <div id="history" class="history">Aún no hay conversación.</div>
+
+  <script>
+    const listenBtn = document.getElementById('listenBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const sendBtn = document.getElementById('sendBtn');
+    const repeatBtn = document.getElementById('repeatBtn');
+    const clearBtn = document.getElementById('clearBtn');
+    const userText = document.getElementById('userText');
+    const reply = document.getElementById('reply');
+    const history = document.getElementById('history');
+
+    const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const STORAGE_KEY = 'asistente_hogar_historial';
+    let recognition = null;
+    let lastAssistantReply = '';
+    let conversation = [];
+
+    function nowLabel() {
+      return new Date().toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    }
+
+    function saveConversation() {
+      sessionStorage.setItem(STORAGE_KEY, JSON.stringify(conversation));
+    }
+
+    function loadConversation() {
+      try {
+        const raw = sessionStorage.getItem(STORAGE_KEY);
+        if (!raw) return;
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          conversation = parsed;
+        }
+      } catch (_) {
+        conversation = [];
+      }
+    }
+
+    function renderHistory() {
+      if (!conversation.length) {
+        history.textContent = 'Aún no hay conversación.';
+        return;
+      }
+
+      history.innerHTML = conversation
+        .map((item) => {
+          return `
+            <div class="history-item">
+              <div class="meta">${item.time} · ${item.role === 'user' ? 'Tú' : 'Asistente'}</div>
+              <div>${item.text}</div>
+            </div>
+          `;
+        })
+        .join('');
+      history.scrollTop = history.scrollHeight;
+    }
+
+    function addHistory(role, text) {
+      conversation.push({ role, text, time: nowLabel() });
+      saveConversation();
+      renderHistory();
+    }
+
+    function speak(text) {
+      if (!window.speechSynthesis) return;
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = 'es-ES';
+      window.speechSynthesis.cancel();
+      window.speechSynthesis.speak(utterance);
+    }
+
+    async function sendMessage(message) {
+      const clean = message.trim();
+      if (!clean) return;
+
+      addHistory('user', clean);
+
+      reply.textContent = 'Procesando...';
+      try {
+        const res = await fetch('/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: clean })
+        });
+
+        if (!res.ok) {
+          throw new Error('Error al consultar /chat');
+        }
+
+        const data = await res.json();
+        const text = data.reply || 'No hubo respuesta.';
+        lastAssistantReply = text;
+        reply.textContent = text;
+        addHistory('assistant', text);
+        speak(text);
+      } catch (error) {
+        const failMessage = 'No se pudo obtener respuesta del asistente.';
+        lastAssistantReply = failMessage;
+        reply.textContent = failMessage;
+        addHistory('assistant', failMessage);
+      }
+    }
+
+    sendBtn.addEventListener('click', () => sendMessage(userText.value));
+    repeatBtn.addEventListener('click', () => {
+      if (!lastAssistantReply) return;
+      speak(lastAssistantReply);
+    });
+    clearBtn.addEventListener('click', () => {
+      conversation = [];
+      sessionStorage.removeItem(STORAGE_KEY);
+      renderHistory();
+      reply.textContent = 'Historial limpiado.';
+    });
+
+    loadConversation();
+    renderHistory();
+    if (conversation.length) {
+      const lastAssistant = [...conversation].reverse().find((item) => item.role === 'assistant');
+      if (lastAssistant?.text) {
+        lastAssistantReply = lastAssistant.text;
+      }
+    }
+
+    if (Recognition) {
+      recognition = new Recognition();
+      recognition.lang = 'es-ES';
+      recognition.interimResults = false;
+      recognition.maxAlternatives = 1;
+
+      recognition.onresult = (event) => {
+        const transcript = event.results?.[0]?.[0]?.transcript || '';
+        userText.value = transcript;
+        sendMessage(transcript);
+      };
+
+      recognition.onerror = () => {
+        reply.textContent = 'No se pudo reconocer tu voz. Revisa permisos de micrófono.';
+      };
+
+      listenBtn.addEventListener('click', () => recognition.start());
+      stopBtn.addEventListener('click', () => recognition.stop());
+    } else {
+      listenBtn.disabled = true;
+      stopBtn.disabled = true;
+      reply.textContent = 'Tu navegador no soporta reconocimiento de voz Web Speech API.';
+    }
+  </script>
+</body>
+</html>

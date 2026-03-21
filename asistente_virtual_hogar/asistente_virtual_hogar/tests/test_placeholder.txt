@@ -1,0 +1,1 @@
+Aquí luego puedes agregar pruebas con pytest para productos, compras, consumos y alertas.

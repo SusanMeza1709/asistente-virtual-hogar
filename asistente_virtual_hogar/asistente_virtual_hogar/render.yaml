@@ -2,6 +2,7 @@ services:
   - type: web
     name: asistente-virtual-hogar
     env: python
+    pythonVersion: 3.11
     plan: free
     buildCommand: cd asistente_virtual_hogar/asistente_virtual_hogar && pip install -r requirements.txt
     startCommand: cd asistente_virtual_hogar/asistente_virtual_hogar && uvicorn app.main:app --host 0.0.0.0 --port $PORT

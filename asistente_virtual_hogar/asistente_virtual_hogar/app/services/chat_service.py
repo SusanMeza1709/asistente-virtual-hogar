@@ -14,7 +14,23 @@ from app.services.purchase_service import PurchaseService
 
 
 class ChatService:
-    ACTION_ADD = ("agregar", "anadir", "añadir", "crear", "registrar")
+    ACTION_ADD = (
+        "agregar",
+        "agrega",
+        "agregame",
+        "agregame",
+        "anadir",
+        "añadir",
+        "anade",
+        "añade",
+        "crear",
+        "crea",
+        "registrar",
+        "registra",
+        "mete",
+        "pon",
+        "sumar",
+    )
     ACTION_BUY = ("comprar", "compra", "adquirir", "adquiere", "reponer", "traer", "trae")
     ACTION_CONSUME = ("consumir", "consume", "gastar", "usar", "usa", "tomar", "toma", "comer", "come", "beber", "bebe")
 
@@ -80,7 +96,14 @@ class ChatService:
             "producto",
         }
         tokens = [token for token in ChatService._normalize(candidate).split() if token not in filler_words]
-        return " ".join(tokens).strip()
+        cleaned = " ".join(tokens).strip()
+        cleaned = re.sub(
+            r"\b(?:al|a|en|para\s+el|para\s+la)\s+(?:inventario|despensa|refri|refrigerador|cocina)\b",
+            "",
+            cleaned,
+        )
+        cleaned = re.sub(r"\s+", " ", cleaned).strip(" ,.-")
+        return cleaned
 
     @staticmethod
     def _find_product_flexible(db: Session, raw_name: str):
@@ -233,7 +256,7 @@ class ChatService:
             return None
 
         create_pattern = (
-            r"(?:agregar|anadir|añadir|crear|registrar)\s+"
+            r"(?:agregar|agrega|agregame|anadir|añadir|anade|añade|crear|crea|registrar|registra|mete|pon|sumar)\s+"
             r"(?:un\s+|una\s+|el\s+|la\s+)?"
             r"(?:producto\s+)?"
             r"(?P<name>[^,]+)"
@@ -242,7 +265,7 @@ class ChatService:
         if not match:
             return None
 
-        name = match.group("name").strip().title()
+        name = ChatService._clean_candidate_name(match.group("name")).title()
         if not name:
             return "Te entendí que quieres agregar un producto, pero no capté el nombre."
 

@@ -31,7 +31,7 @@ class WhatsAppService:
         if not account_sid or not auth_token or not from_number:
             return (
                 False,
-                "Faltan credenciales de Twilio (TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_WHATSAPP_FROM).",
+                "Faltan credenciales de Twilio (TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_WHATSAPP_FROM). Configuralas en Render -> Service -> Environment. TWILIO_WHATSAPP_FROM debe verse como whatsapp:+14155238886.",
             )
 
         to_formatted = WhatsAppService._normalize_phone(to_number)

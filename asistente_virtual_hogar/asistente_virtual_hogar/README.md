@@ -88,6 +88,24 @@ Endpoints en producción:
 
 El reconocimiento de voz del navegador requiere HTTPS en la mayoría de dispositivos móviles. Render ya entrega HTTPS, por eso `/voz` funciona mejor allí que en red local sin certificado.
 
+## Configurar WhatsApp automatico (Twilio)
+
+Para que el comando "enviame la lista por WhatsApp automatico" envie el mensaje de verdad (sin link manual), configura Twilio en Render.
+
+1. En Twilio, activa WhatsApp Sandbox (o usa un numero de WhatsApp Business aprobado).
+2. Copia estos datos de Twilio:
+  - `TWILIO_ACCOUNT_SID`
+  - `TWILIO_AUTH_TOKEN`
+  - `TWILIO_WHATSAPP_FROM` (ejemplo: `whatsapp:+14155238886`)
+3. En Render, abre tu servicio web y agrega esas 3 variables en **Environment**.
+4. Haz redeploy del servicio.
+5. Si usas Sandbox, une tu numero enviando el codigo `join ...` al numero de sandbox.
+
+Despues de eso, en el chat:
+
+- `mi numero de whatsapp es 926342398`
+- `enviame la lista por whatsapp automatico`
+
 ## Ejemplos de uso
 
 ### Crear producto

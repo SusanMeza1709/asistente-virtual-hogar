@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.models.schemas import ConsumptionCreate, MemoryCreate, ProductCreate, ProductUpdate, PurchaseCreate
 from app.services.alert_service import AlertService
 from app.services.consumption_service import ConsumptionService
+from app.services.dashboard_service import DashboardService
 from app.services.inventory_service import InventoryService
 from app.services.memory_service import MemoryService
 from app.services.product_service import ProductService
@@ -146,6 +147,8 @@ class ChatService:
         "comparte la lista",
         "pasame la lista",
         "pásame la lista",
+    )
+    SHARE_REPORT_HINTS = (
         "envia dashboard",
         "enviar dashboard",
         "envia reporte",
@@ -161,6 +164,15 @@ class ChatService:
         "compartir dashboard",
         "enviame reporte",
         "enviame dashboard",
+    )
+    MONTHLY_PDF_HINTS = (
+        "gastos del mes en pdf",
+        "pasame gastos del mes en pdf",
+        "pásame gastos del mes en pdf",
+        "reporte mensual en pdf",
+        "resumen mensual en pdf",
+        "dashboard mensual en pdf",
+        "pdf de gastos del mes",
     )
 
     HOUSEHOLD_DEFAULT_REMINDERS = (
@@ -439,6 +451,41 @@ class ChatService:
 
         MemoryService.save_item(db, MemoryCreate(key=ChatService.WHATSAPP_TO_KEY, value=phone))
         return f"Listo. Guardé tu WhatsApp de destino: +{phone}."
+
+    @staticmethod
+    def _dashboard_pdf_url(period_days: int = 30) -> str:
+        path = f"/dashboard/pdf?days={period_days}"
+        base_url = (os.getenv("APP_BASE_URL") or os.getenv("RENDER_EXTERNAL_URL") or "").strip()
+        if not base_url:
+            return path
+        base_url = base_url.rstrip("/")
+        if not base_url.startswith(("http://", "https://")):
+            base_url = "https://" + base_url
+        return f"{base_url}{path}"
+
+    @staticmethod
+    def _is_monthly_pdf_request(text_n: str) -> bool:
+        if ChatService._contains_any(text_n, ChatService.MONTHLY_PDF_HINTS):
+            return True
+        if "pdf" not in text_n:
+            return False
+        month_hint = ChatService._contains_any(text_n, ("mes", "mensual", "30 dias", "30 días"))
+        expense_hint = ChatService._contains_any(
+            text_n,
+            ("gasto", "gastos", "reporte", "dashboard", "resumen del mes", "resumen mensual"),
+        )
+        return month_hint and expense_hint
+
+    @staticmethod
+    def _build_monthly_pdf_reply(db: Session) -> str:
+        summary = PurchaseService.summarize_expenses(db, days=30)
+        pdf_url = ChatService._dashboard_pdf_url(period_days=30)
+        return (
+            "Listo, te preparé el PDF mensual de gastos con dashboard visual (cards + gráficos).\n"
+            f"- Total del mes: S/ {ChatService._fmt_num(summary.total_amount)}\n"
+            f"- Compras con precio: {summary.items_with_price}/{summary.purchases_count}\n"
+            f"Abre aquí tu PDF: {pdf_url}"
+        )
 
     @staticmethod
     def _detect_tone_preference(text_n: str) -> str | None:
@@ -1600,15 +1647,7 @@ class ChatService:
     @staticmethod
     def _build_shopping_list_share_text(db: Session) -> str | None:
         alerts = AlertService.build_alerts(db)
-        expenses = PurchaseService.summarize_expenses(db, days=30)
-
-        lines: list[str] = ["Dashboard del hogar"]
-        lines.append("")
-        lines.append("Gastos (30 dias):")
-        lines.append(f"- Total: {ChatService._fmt_num(expenses.total_amount)}")
-        lines.append(f"- Compras con precio: {expenses.items_with_price}/{expenses.purchases_count}")
-        lines.append("")
-        lines.append("Lista de compras:")
+        lines: list[str] = ["Lista de compras del hogar", "", "Faltantes:"]
 
         if not alerts.shopping_list:
             lines.append("- Sin faltantes por ahora")
@@ -1616,16 +1655,32 @@ class ChatService:
             for item in alerts.shopping_list:
                 lines.append(f"- {item.product_name}: {ChatService._fmt_num(item.needed_quantity)} {item.unit}")
 
+        return "\n".join(lines)
+
+    @staticmethod
+    def _build_monthly_report_share_text(db: Session) -> str:
+        summary = PurchaseService.summarize_expenses(db, days=30)
+        lines: list[str] = ["Reporte mensual del hogar", ""]
+        lines.append("Gastos (ultimos 30 dias):")
+        lines.append(f"- Total: S/ {ChatService._fmt_num(summary.total_amount)}")
+        lines.append(f"- Compras con precio: {summary.items_with_price}/{summary.purchases_count}")
         lines.append("")
-        lines.append("PDF del dashboard: /dashboard/pdf")
+        lines.append(f"PDF del dashboard mensual: {ChatService._dashboard_pdf_url(period_days=30)}")
+
         return "\n".join(lines)
 
     @staticmethod
     def _try_share_shopping_list(db: Session, text_n: str) -> str | None:
-        if not ChatService._contains_any(text_n, ChatService.SHARE_LIST_HINTS):
+        wants_list = ChatService._contains_any(text_n, ChatService.SHARE_LIST_HINTS)
+        wants_report = ChatService._contains_any(text_n, ChatService.SHARE_REPORT_HINTS)
+        if not wants_list and not wants_report:
             return None
 
-        share_text = ChatService._build_shopping_list_share_text(db)
+        share_text = (
+            ChatService._build_shopping_list_share_text(db)
+            if wants_list
+            else ChatService._build_monthly_report_share_text(db)
+        )
         encoded = quote(share_text)
         wants_whatsapp = "whatsapp" in text_n or "wsp" in text_n or "wtspp" in text_n
         wants_email = "correo" in text_n or "mail" in text_n or "email" in text_n
@@ -1673,8 +1728,9 @@ class ChatService:
             auto_note = "\nEnvio automático real por WhatsApp requiere API (Meta/Twilio)." if wants_auto else ""
             target_suffix = target_phone if target_phone else ""
             wa_base = f"https://wa.me/{target_suffix}?text=" if target_suffix else "https://wa.me/?text="
+            summary = "lista de compras" if wants_list else "reporte mensual"
             return (
-                "Listo, aquí tienes para compartir por WhatsApp (dashboard + gastos + faltantes):\n"
+                f"Listo, aquí tienes para compartir por WhatsApp ({summary}):\n"
                 f"{wa_base}{encoded}"
                 f"{auto_note}"
             )
@@ -1915,6 +1971,10 @@ class ChatService:
         # 11. Household reminders list
         if ChatService._contains_any(text_i, ChatService.HOUSEHOLD_REMINDER_HINTS):
             return ChatService._build_household_reminders_reply(db)
+
+        # 11.05 Monthly expenses PDF
+        if ChatService._is_monthly_pdf_request(text_i):
+            return ChatService._build_monthly_pdf_reply(db)
 
         # 11.1 Share shopping list
         share_list_reply = ChatService._try_share_shopping_list(db, text_i)

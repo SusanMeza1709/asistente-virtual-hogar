@@ -1,4 +1,5 @@
 import re
+import random
 import unicodedata
 from datetime import datetime
 from difflib import get_close_matches
@@ -40,7 +41,7 @@ class ChatService:
         "pon",
         "sumar",
     )
-    ACTION_BUY = ("comprar", "compra", "adquirir", "adquiere", "reponer", "traer", "trae")
+    ACTION_BUY = ("comprar", "compra", "compre", "compré", "adquirir", "adquiere", "reponer", "traer", "trae")
     ACTION_CONSUME = (
         "consumir", "consume", "consumí", "consumi",
         "gastar", "gaste", "gasté",
@@ -79,6 +80,15 @@ class ChatService:
         {"name": "Arroz con huevo", "ingredients": ("arroz", "huevo")},
         {"name": "Batido de papaya", "ingredients": ("papaya", "leche")},
     )
+
+    NATURAL_INTROS = (
+        "Perfecto,",
+        "Buenísimo,",
+        "Claro,",
+        "Listo,",
+    )
+
+    TONE_KEY = "__chat_tone__"
     # Confirmation / denial
     CONFIRM_HINTS = (
         "si", "sí", "claro", "dale", "ok", "afirmativo", "por supuesto",
@@ -125,11 +135,82 @@ class ChatService:
         return any(option in text for option in options)
 
     @staticmethod
+    def _choose(options: tuple[str, ...] | list[str]) -> str:
+        return random.choice(list(options))
+
+    @staticmethod
+    def _get_tone(db: Session) -> str:
+        tone_item = MemoryService.get_by_key(db, ChatService.TONE_KEY)
+        if not tone_item:
+            return "casual"
+        value = ChatService._normalize(tone_item.value)
+        return "formal" if value == "formal" else "casual"
+
+    @staticmethod
+    def _set_tone(db: Session, tone: str) -> None:
+        if tone not in ("casual", "formal"):
+            return
+        MemoryService.save_item(db, MemoryCreate(key=ChatService.TONE_KEY, value=tone))
+
+    @staticmethod
+    def _detect_tone_preference(text_n: str) -> str | None:
+        formal_patterns = (
+            "habla formal",
+            "hablame formal",
+            "háblame formal",
+            "responde formal",
+            "modo formal",
+            "tratame de usted",
+            "trátame de usted",
+        )
+        casual_patterns = (
+            "habla casual",
+            "hablame casual",
+            "háblame casual",
+            "responde casual",
+            "modo casual",
+            "hablame normal",
+            "háblame normal",
+        )
+        if ChatService._contains_any(text_n, formal_patterns):
+            return "formal"
+        if ChatService._contains_any(text_n, casual_patterns):
+            return "casual"
+        return None
+
+    @staticmethod
+    def _maybe_update_tone(db: Session, text_n: str) -> str | None:
+        detected = ChatService._detect_tone_preference(text_n)
+        if not detected:
+            return None
+        ChatService._set_tone(db, detected)
+        if detected == "formal":
+            return "Perfecto. Desde ahora te responderé en un tono más formal."
+        return "Perfecto. Desde ahora te responderé en un tono más cercano y casual."
+
+    @staticmethod
+    def _tone_pick(db: Session, casual: tuple[str, ...], formal: tuple[str, ...]) -> str:
+        tone = ChatService._get_tone(db)
+        return ChatService._choose(formal if tone == "formal" else casual)
+
+    @staticmethod
     def _extract_qty(text: str, default: float = 1.0) -> float:
         match = re.search(r"(\d+(?:[.,]\d+)?)", text)
         if not match:
             return default
         return float(match.group(1).replace(",", "."))
+
+    @staticmethod
+    def _extract_unit_price(text: str) -> float | None:
+        patterns = [
+            r"\ba\s*(?:s\/|s\.)?\s*(\d+(?:[.,]\d+)?)\b",
+            r"\b(?:por|costo|cost[óo]|me\s+costo|me\s+cost[óo])\s*(?:s\/|s\.)?\s*(\d+(?:[.,]\d+)?)\b",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, text)
+            if match:
+                return float(match.group(1).replace(",", "."))
+        return None
 
     @staticmethod
     def _fmt_num(value: float) -> str:
@@ -357,28 +438,88 @@ class ChatService:
         )
 
     @staticmethod
-    def _try_social_reply(text_n: str) -> str | None:
+    def _try_social_reply(db: Session, text_n: str) -> str | None:
         if ChatService._contains_any(text_n, ChatService.GREETING_HINTS):
-            return "¡Hola! Qué gusto ayudarte. Dime qué necesitas en casa y yo me encargo."
+            return ChatService._tone_pick(
+                db,
+                (
+                    "¡Hola! Qué gusto tenerte por aquí. ¿Qué necesitas hoy en casa?",
+                    "¡Hola! Aquí estoy para ayudarte con tu casa. Cuéntame qué quieres hacer.",
+                    "¡Hey! Estoy lista para ayudarte con inventario, compras, alertas o recuerdos.",
+                ),
+                (
+                    "Hola. Es un gusto saludarte. ¿En qué te ayudo hoy con el hogar?",
+                    "Hola, con gusto te ayudo. Indícame qué deseas revisar.",
+                    "Buenos días. Estoy disponible para asistirte con inventario y recordatorios.",
+                ),
+            )
 
         if ChatService._contains_any(text_n, ChatService.MOOD_HINTS):
-            return "¡Todo bien por aquí! Listo para ayudarte con compras, consumos, inventario o alertas."
+            return ChatService._tone_pick(
+                db,
+                (
+                    "¡Todo bien por aquí! Lista para ayudarte con lo de la casa.",
+                    "Muy bien, gracias. ¿Seguimos con inventario, compras o alertas?",
+                    "Con energía total. Dime y lo resolvemos juntos.",
+                ),
+                (
+                    "Todo bien, gracias. Estoy lista para ayudarte.",
+                    "Muy bien, gracias por preguntar. ¿Qué deseas gestionar ahora?",
+                    "Me encuentro bien. Indícame y avanzamos.",
+                ),
+            )
 
         if ChatService._contains_any(text_n, ChatService.WHO_HINTS):
-            return "Soy tu asistente virtual del hogar. Te ayudo a registrar productos, compras, consumos, alertas y recuerdos."
+            return (
+                "Soy tu asistente virtual del hogar. "
+                "Te ayudo con inventario, compras, consumos, alertas, recetas y recordatorios."
+            )
 
         if ChatService._contains_any(text_n, ChatService.THANKS_HINTS):
-            return "¡De nada! Estoy para ayudarte cuando quieras."
+            return ChatService._tone_pick(
+                db,
+                (
+                    "¡De nada! Me encanta ayudarte.",
+                    "¡Siempre! Cuando quieras seguimos.",
+                    "Con gusto. Avísame y hacemos lo siguiente.",
+                ),
+                (
+                    "Con gusto. Estoy para ayudarte.",
+                    "Ha sido un placer ayudarte.",
+                    "De nada. Si deseas, continuamos con lo siguiente.",
+                ),
+            )
 
         if ChatService._contains_any(text_n, ChatService.GOODBYE_HINTS):
-            return "Perfecto, quedo atento. ¡Hasta luego!"
+            return ChatService._tone_pick(
+                db,
+                (
+                    "Perfecto, quedo pendiente. ¡Hasta luego!",
+                    "Listo, aquí estaré cuando me necesites. ¡Chao!",
+                    "Hecho, hablamos luego. ¡Que te vaya súper!",
+                ),
+                (
+                    "Perfecto, quedo atenta. Hasta luego.",
+                    "De acuerdo. Estaré disponible cuando lo necesites.",
+                    "Conforme. Nos vemos más tarde.",
+                ),
+            )
 
         if ChatService._contains_any(text_n, ChatService.HELP_HINTS):
-            return (
-                "Puedo ayudarte de forma natural. Por ejemplo: "
-                "'compré 2 leches', 'gasté 1 yogurt', 'agrega 3 huevos', "
-                "'qué tengo en casa', 'ver alertas' o "
-                "'recuerda que mi bebida favorita es café'."
+            return ChatService._tone_pick(
+                db,
+                (
+                    "Puedo ayudarte de forma natural. Por ejemplo: "
+                    "'compré 2 leches a 5.50', 'gasté 1 yogurt', 'agrega 3 huevos', "
+                    "'qué tengo en casa', 'resumen diario', 'recetas según inventario' o "
+                    "'recuerda que mi bebida favorita es café'.",
+                ),
+                (
+                    "Puedo ayudarte con órdenes en lenguaje natural. Por ejemplo: "
+                    "'compré 2 leches a 5.50', 'consumí 1 yogurt', 'agrega 3 huevos', "
+                    "'inventario actual', 'resumen diario' o "
+                    "'recuerda que mi bebida favorita es café'.",
+                ),
             )
 
         return None
@@ -504,6 +645,7 @@ class ChatService:
         match = regex.fullmatch(text)
         qty: float
         name: str
+        unit_price = ChatService._extract_unit_price(text_n) if not consume else None
 
         if match:
             qty = float(match.group("qty"))
@@ -551,9 +693,15 @@ class ChatService:
         PurchaseService.register_purchase(
             db,
             product,
-            PurchaseCreate(product_name=product.name, quantity=qty),
+            PurchaseCreate(product_name=product.name, quantity=qty, unit_price=unit_price),
         )
         total = ChatService._fmt_num(product.stock_current)
+        if unit_price is not None:
+            amount = ChatService._fmt_num(unit_price * qty)
+            return (
+                f"Compré {qty_str} {unit} de {product.name} a {ChatService._fmt_num(unit_price)} c/u. "
+                f"Gasto registrado: {amount}. Ahora tienes {total} {unit} en casa."
+            )
         return (
             f"Compré {qty_str} {unit} de {product.name}. "
             f"Ahora tienes {total} {unit} en casa."
@@ -673,7 +821,7 @@ class ChatService:
         AlertService.refresh_product_statuses(db)
         products = ProductService.list_products(db)
         if not products:
-            return "Tu inventario está vacío todavía."
+            return "Tu inventario está vacío por ahora. Si quieres, te ayudo a cargarlo en un minuto."
 
         lines = []
         for product in products:
@@ -688,7 +836,12 @@ class ChatService:
             lines.append(
                 f"- {product.name}: {ChatService._fmt_num(product.stock_current)} {product.unit} ({product.location or 'sin ubicación'}){status_hint}"
             )
-        return "Esto es lo que tienes en casa:\n" + "\n".join(lines)
+        intro = ChatService._choose((
+            "Esto es lo que tienes en casa:",
+            "Te paso tu inventario actual:",
+            "Así va tu inventario ahora mismo:",
+        ))
+        return intro + "\n" + "\n".join(lines)
 
     @staticmethod
     def _build_expiring_reply(db: Session) -> str:
@@ -717,13 +870,13 @@ class ChatService:
     def _build_shopping_list_reply(db: Session) -> str:
         alerts = AlertService.build_alerts(db)
         if not alerts.shopping_list:
-            return "Tu lista de compras está vacía por ahora."
+            return "Tu lista de compras está vacía por ahora. Vas muy bien con el stock."
 
         lines = [
             f"- {item.product_name}: compra al menos {ChatService._fmt_num(item.needed_quantity)} {item.unit}"
             for item in alerts.shopping_list
         ]
-        return "Lista de compras:\n" + "\n".join(lines)
+        return "Te armé esta lista de compras:\n" + "\n".join(lines)
 
     @staticmethod
     def _build_daily_alerts_reply(db: Session) -> str:
@@ -750,14 +903,14 @@ class ChatService:
     def _build_expense_reply(db: Session) -> str:
         summary = PurchaseService.summarize_expenses(db, days=30)
         if summary.purchases_count == 0:
-            return "Aún no tengo compras registradas para calcular gastos del hogar."
+            return "Todavía no tengo compras registradas para calcular gastos del hogar."
         if summary.items_with_price == 0:
             return (
                 f"Tienes {summary.purchases_count} compra(s) registradas en los últimos {summary.period_days} días, "
                 "pero ninguna con precio. Si registras unit_price podré calcular el gasto total."
             )
         return (
-            f"Gastos del hogar en los últimos {summary.period_days} días: {ChatService._fmt_num(summary.total_amount)}. "
+            f"En los últimos {summary.period_days} días llevas {ChatService._fmt_num(summary.total_amount)} en gastos del hogar. "
             f"Tomé {summary.items_with_price} compra(s) con precio de un total de {summary.purchases_count}."
         )
 
@@ -874,8 +1027,8 @@ class ChatService:
         reminder_hint = reminders[0] if reminders else "sin recordatorios pendientes"
 
         return (
-            f"Resumen diario: Hoy vencen {expired_count} producto(s), hay {expiring_count} por vencer, "
-            f"faltan {missing} y mañana toca comprar {tomorrow_buy}. "
+            f"Aquí va tu resumen de hoy: vencen {expired_count} producto(s), hay {expiring_count} por vencer, "
+            f"faltan {missing} y para mañana te sugiero comprar {tomorrow_buy}. "
             f"Recordatorio clave: {reminder_hint}."
         )
 
@@ -884,13 +1037,18 @@ class ChatService:
         text = message.strip()
         text_n = ChatService._normalize(text)
 
+        # 0. Conversational tone preference
+        tone_reply = ChatService._maybe_update_tone(db, text_n)
+        if tone_reply:
+            return tone_reply
+
         # 1. Pending confirmation takes priority
         pending_reply = ChatService._try_pending_confirmation(db, text_n)
         if pending_reply:
             return pending_reply
 
         # 2. Social / conversational
-        social_reply = ChatService._try_social_reply(text_n)
+        social_reply = ChatService._try_social_reply(db, text_n)
         if social_reply:
             return social_reply
 
@@ -1017,8 +1175,19 @@ class ChatService:
             return "Esto recuerdo de ti:\n" + "\n".join(f"- {item.key}: {item.value}" for item in items)
 
         return (
-            "No entendí eso del todo, pero puedo ayudarte. Por ejemplo: "
-            "'compré 2 leches', 'gasté 1 yogurt', 'agrega 3 huevos', "
-            "'qué tengo en casa', 'productos por vencer', 'lista de compras', 'gastos del hogar' o "
-            "'recuerda que mi bebida favorita es café'."
+            ChatService._tone_pick(
+                db,
+                (
+                    "No te seguí del todo, pero lo resolvemos rápido. Prueba algo como: "
+                    "'compré 2 leches a 5.50', 'gasté 1 yogurt', 'agrega 3 huevos', "
+                    "'resumen diario', 'recetas según inventario', 'lista de compras' o "
+                    "'recuerda que mi bebida favorita es café'.",
+                ),
+                (
+                    "No logré interpretar esa solicitud con claridad. Puedes probar con algo como: "
+                    "'compré 2 leches a 5.50', 'consumí 1 yogurt', 'agrega 3 huevos', "
+                    "'resumen diario', 'recetas según inventario' o "
+                    "'recuerda que mi bebida favorita es café'.",
+                ),
+            )
         )

@@ -170,6 +170,17 @@ class ChatService:
         global _PENDING
         import json
         from app.models.entities import MemoryItem
+
+        def _clear_pending_state() -> None:
+            try:
+                db.query(MemoryItem).filter_by(key="__pending_create__").delete()
+                db.commit()
+            except Exception:
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
+            _PENDING.clear()
         
         # Busca estado pendiente en DB first
         pending = None
@@ -191,50 +202,62 @@ class ChatService:
                 name = pending["name"]
                 qty = pending.get("qty", 0.0)
                 unit = pending.get("unit", "unidad")
-                
-                # Limpia el estado pendiente
+
                 try:
-                    db.query(MemoryItem).filter_by(key="__pending_create__").delete()
-                    db.commit()
-                except:
-                    pass
-                
-                _PENDING.clear()
-                
-                # Crea el producto
-                created = ProductService.create_product(
-                    db,
-                    ProductCreate(
-                        name=name,
-                        stock_current=qty,
-                        unit=unit,
-                        stock_minimum=1,
-                    ),
-                )
-                stock_str = ChatService._fmt_num(created.stock_current)
-                if qty > 0:
-                    return (
-                        f"¡Listo! Agregué {created.name} al inventario "
-                        f"con {stock_str} {created.unit} de entrada."
+                    existing = ChatService._find_product_flexible(db, name)
+                    if existing:
+                        if qty > 0:
+                            before = existing.stock_current
+                            InventoryService.increase_stock(db, existing, qty)
+                            _clear_pending_state()
+                            return (
+                                f"{existing.name} ya existía. Sumé {ChatService._fmt_num(qty)} {existing.unit}. "
+                                f"Antes tenías {ChatService._fmt_num(before)} y ahora tienes "
+                                f"{ChatService._fmt_num(existing.stock_current)} {existing.unit}."
+                            )
+
+                        _clear_pending_state()
+                        return (
+                            f"{existing.name} ya estaba en el inventario. "
+                            f"Cuando lo compres, avísame y sumo el stock."
+                        )
+
+                    created = ProductService.create_product(
+                        db,
+                        ProductCreate(
+                            name=name,
+                            stock_current=qty,
+                            unit=unit,
+                            stock_minimum=1,
+                        ),
                     )
-                return (
-                    f"¡Listo! Creé {created.name} en el inventario. "
-                    f"Cuando lo compres, avísame y sumo el stock."
-                )
+                    _clear_pending_state()
+
+                    stock_str = ChatService._fmt_num(created.stock_current)
+                    if qty > 0:
+                        return (
+                            f"¡Listo! Agregué {created.name} al inventario "
+                            f"con {stock_str} {created.unit} de entrada."
+                        )
+                    return (
+                        f"¡Listo! Creé {created.name} en el inventario. "
+                        f"Cuando lo compres, avísame y sumo el stock."
+                    )
+                except Exception:
+                    try:
+                        db.rollback()
+                    except Exception:
+                        pass
+                    return (
+                        "Se me complicó confirmar ese producto en este momento. "
+                        "Inténtalo otra vez con: 'agrega nombre_del_producto'."
+                    )
 
             return "Acción confirmada, pero no encontré qué hacer. Cuéntame de nuevo."
 
         if ChatService._contains_any(text_n, ChatService.DENY_HINTS):
             pending_name = pending.get("name", "el producto")
-            
-            # Limpia el estado
-            try:
-                db.query(MemoryItem).filter_by(key="__pending_create__").delete()
-                db.commit()
-            except:
-                pass
-            
-            _PENDING.clear()
+            _clear_pending_state()
             
             return f"Entendido, no creé {pending_name}. Avísame si cambias de idea."
 

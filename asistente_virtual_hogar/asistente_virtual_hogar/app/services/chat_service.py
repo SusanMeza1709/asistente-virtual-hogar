@@ -29,6 +29,7 @@ class ChatService:
         "agregar",
         "agrega",
         "agregame",
+        "anotar",
         "anadir",
         "añadir",
         "anade",
@@ -39,9 +40,14 @@ class ChatService:
         "registra",
         "mete",
         "pon",
+        "ingresar",
+        "ingresa",
         "sumar",
     )
-    ACTION_BUY = ("comprar", "compra", "compre", "compré", "adquirir", "adquiere", "reponer", "traer", "trae")
+    ACTION_BUY = (
+        "comprar", "compra", "compre", "compré", "adquirir", "adquiere", "reponer", "traer", "trae",
+        "traje", "comprame", "comprare", "compraré",
+    )
     ACTION_CONSUME = (
         "consumir", "consume", "consumí", "consumi",
         "gastar", "gaste", "gasté",
@@ -49,18 +55,81 @@ class ChatService:
         "tomar", "tome", "tomé", "toma",
         "comer", "comi", "comí", "come",
         "beber", "bebi", "bebí", "bebe",
+        "acabar", "acabe", "acabé",
     )
 
-    INVENTORY_HINTS = ("inventario", "stock", "que tengo", "qué tengo", "lista de productos", "productos tengo")
-    ALERT_HINTS = ("alerta", "alertas", "por vencer", "vencimiento", "falta comprar", "bajo stock")
-    MEMORY_HINTS = ("memoria", "que recuerdas", "qué recuerdas", "recuerdas de mi", "recuerdas de mí")
-    EXPIRING_HINTS = ("productos por vencer", "que esta por vencer", "qué está por vencer", "por vencer")
-    SHOPPING_LIST_HINTS = ("lista de compras", "que falta comprar", "qué falta comprar", "compras pendientes")
-    DAILY_ALERT_HINTS = ("alertas del dia", "alertas del día", "resumen del dia", "resumen del día")
-    EXPENSE_HINTS = ("gastos del hogar", "gastos de la casa", "cuanto he gastado", "cuánto he gastado", "mis gastos")
+    INVENTORY_HINTS = (
+        "inventario", "stock", "que tengo en casa", "qué tengo en casa", "lista de productos", "productos tengo",
+        "que hay en casa", "qué hay en casa", "que hay en la refri", "qué hay en la refri", "mi despensa",
+    )
+    ALERT_HINTS = (
+        "alerta", "alertas", "por vencer", "vencimiento", "falta comprar", "bajo stock", "avisos", "notificaciones",
+    )
+    MEMORY_HINTS = (
+        "memoria", "que recuerdas", "qué recuerdas", "recuerdas de mi", "recuerdas de mí", "que sabes de mi", "qué sabes de mí",
+    )
+    EXPIRING_HINTS = (
+        "productos por vencer",
+        "que esta por vencer",
+        "qué está por vencer",
+        "por vencer",
+        "que esta vencido",
+        "qué está vencido",
+        "vencidos",
+    )
+    SHOPPING_LIST_HINTS = (
+        "lista de compras",
+        "que falta comprar",
+        "qué falta comprar",
+        "compras pendientes",
+        "que me falta comprar",
+        "qué me falta comprar",
+    )
+    DAILY_ALERT_HINTS = (
+        "alertas del dia",
+        "alertas del día",
+        "resumen del dia",
+        "resumen del día",
+        "como va el dia",
+        "cómo va el día",
+    )
+    EXPENSE_HINTS = (
+        "gastos del hogar",
+        "gastos de la casa",
+        "cuanto he gastado",
+        "cuánto he gastado",
+        "mis gastos",
+        "cuanto gaste",
+        "cuánto gasté",
+        "cuanto gastar",
+        "cuánto gastar",
+        "cuanto gasto",
+        "cuánto gasto",
+    )
     IMPORTANT_MEMORY_HINTS = ("recuerdos importantes", "recuerdos clave", "cosas importantes que recuerdas")
     CONSUME_FIRST_HINTS = ("que consumir primero", "qué consumir primero", "que debo consumir primero", "qué debo consumir primero")
-    RECIPE_HINTS = ("recetas segun inventario", "recetas según inventario", "que puedo cocinar", "qué puedo cocinar", "con lo que hay en la refri")
+    RECIPE_HINTS = (
+        "recetas segun inventario",
+        "recetas según inventario",
+        "que puedo cocinar",
+        "qué puedo cocinar",
+        "con lo que hay en la refri",
+        "que cocino con lo que tengo en la refri",
+        "qué cocino con lo que tengo en la refri",
+        "que cocinar con lo que tengo en la refri",
+        "qué cocinar con lo que tengo en la refri",
+        "que cocino con lo que tengo",
+        "qué cocino con lo que tengo",
+        "que cocinar con lo que tengo",
+        "qué cocinar con lo que tengo",
+        "que recetas me recomiendas",
+        "qué recetas me recomiendas",
+        "recomiendame una receta",
+        "recomiéndame una receta",
+        "recomendar una receta",
+        "recomendar algo de comer",
+        "dame recetas",
+    )
     DAILY_SUMMARY_HINTS = ("resumen diario", "resumen del dia", "resumen del día", "resumen diario automatico", "resumen diario automático")
     HOUSEHOLD_REMINDER_HINTS = ("recordatorios del hogar", "recordatorio del hogar", "recordatorios hogar")
 
@@ -88,7 +157,92 @@ class ChatService:
         "Listo,",
     )
 
+    INTENT_TOKEN_ALIASES = {
+        # typos
+        "camviar": "cambiar",
+        "canviar": "cambiar",
+        "hubicacion": "ubicacion",
+        "uvicacion": "ubicacion",
+        "ubicaion": "ubicacion",
+        "recetra": "receta",
+        "resetas": "recetas",
+        "rceetas": "recetas",
+        "ubicasion": "ubicacion",
+        "consumoo": "consumo",
+        "comrpar": "comprar",
+        "refri": "refri",
+        "q": "que",
+        "k": "que",
+        # inflections / variants
+        "cambia": "cambiar",
+        "cambialo": "cambiar",
+        "cambiala": "cambiar",
+        "actualiza": "actualizar",
+        "modifica": "modificar",
+        "mueve": "mover",
+        "borra": "borrar",
+        "elimina": "eliminar",
+        "eliminalo": "eliminar",
+        "elimnalo": "eliminar",
+        "botar": "eliminar",
+        "bota": "eliminar",
+        "quitar": "eliminar",
+        "quita": "eliminar",
+        "agrega": "agregar",
+        "agregalo": "agregar",
+        "agregala": "agregar",
+        "anota": "agregar",
+        "apunta": "agregar",
+        "comprame": "comprar",
+        "compre": "comprar",
+        "compree": "comprar",
+        "traje": "comprar",
+        "trajee": "comprar",
+        "repone": "reponer",
+        "reponerlo": "reponer",
+        "gaste": "gastar",
+        "gastee": "gastar",
+        "use": "usar",
+        "usee": "usar",
+        "bebi": "beber",
+        "consumi": "consumir",
+        "consumi": "consumir",
+        "comi": "comer",
+        "acabe": "acabar",
+        "acabo": "acabar",
+        "seacabo": "acabar",
+        "recomiendame": "recomendar",
+        "recomiendame": "recomendar",
+        "sugiere": "recomendar",
+        "sugiereme": "recomendar",
+        "cocino": "cocinar",
+        "cocinas": "cocinar",
+        "jato": "casa",
+        "refri": "refri",
+        "recordatorio": "recordatorio",
+    }
+
+    INTENT_PHRASE_ALIASES = (
+        (r"\bque\s+hay\s+en\s+mi\s+refri\b", "que hay en la refri"),
+        (r"\bque\s+tengo\s+en\s+mi\s+refri\b", "que hay en la refri"),
+        (r"\bque\s+falta\s+en\s+la\s+casa\b", "que falta comprar"),
+        (r"\bque\s+me\s+falta\s+comprar\b", "que falta comprar"),
+        (r"\bque\s+puedo\s+hacer\s+de\s+comer\b", "que puedo cocinar"),
+        (r"\bque\s+puedo\s+preparar\b", "que puedo cocinar"),
+        (r"\bque\s+recetas\s+me\s+recomiendas\b", "que recetas me recomiendas"),
+        (r"\brecomiendame\s+algo\s+de\s+comer\b", "recomiendame una receta"),
+        (r"\brecomendar\s+algo\s+de\s+comer\b", "recomendar una receta"),
+        (r"\bcambiar\s+la\s+ubica(?:cion|ción)\b", "cambiar la ubicacion"),
+        (r"\bcamviar\s+la\s+ubica(?:cion|ción)\b", "cambiar la ubicacion"),
+        (r"\bdel\s+frigo\b", "de la refri"),
+        (r"\bde\s+la\s+jato\b", "de la casa"),
+        (r"\bque\s+tan\s+voy\s+hoy\b", "resumen diario"),
+        (r"\bcuanto\s+gastar\b", "cuanto he gastado"),
+        (r"\bcuanto\s+gasto\b", "cuanto he gastado"),
+    )
+
     TONE_KEY = "__chat_tone__"
+    LOCALE_KEY = "__chat_locale__"
     # Confirmation / denial
     CONFIRM_HINTS = (
         "si", "sí", "claro", "dale", "ok", "afirmativo", "por supuesto",
@@ -132,7 +286,25 @@ class ChatService:
 
     @staticmethod
     def _contains_any(text: str, options: tuple) -> bool:
-        return any(option in text for option in options)
+        normalized_text = ChatService._normalize(text)
+        for option in options:
+            normalized_option = ChatService._normalize(str(option))
+            if not normalized_option:
+                continue
+            escaped_option = re.escape(normalized_option).replace("\\ ", r"\s+")
+            pattern = rf"(^|\b){escaped_option}(\b|$)"
+            if re.search(pattern, normalized_text):
+                return True
+        return False
+
+    @staticmethod
+    def _canonicalize_intent_text(text_n: str) -> str:
+        tokens = text_n.split()
+        canonical_tokens = [ChatService.INTENT_TOKEN_ALIASES.get(token, token) for token in tokens]
+        canonical_text = " ".join(canonical_tokens)
+        for pattern, replacement in ChatService.INTENT_PHRASE_ALIASES:
+            canonical_text = re.sub(pattern, replacement, canonical_text)
+        return re.sub(r"\s+", " ", canonical_text).strip()
 
     @staticmethod
     def _choose(options: tuple[str, ...] | list[str]) -> str:
@@ -151,6 +323,43 @@ class ChatService:
         if tone not in ("casual", "formal"):
             return
         MemoryService.save_item(db, MemoryCreate(key=ChatService.TONE_KEY, value=tone))
+
+    @staticmethod
+    def _get_locale(db: Session) -> str:
+        locale_item = MemoryService.get_by_key(db, ChatService.LOCALE_KEY)
+        if not locale_item:
+            return "pe"
+        value = ChatService._normalize(locale_item.value)
+        return "pe" if value in ("pe", "peru", "peruano") else value
+
+    @staticmethod
+    def _set_locale(db: Session, locale: str) -> None:
+        if not locale:
+            return
+        MemoryService.save_item(db, MemoryCreate(key=ChatService.LOCALE_KEY, value=locale))
+
+    @staticmethod
+    def _detect_locale_preference(text_n: str) -> str | None:
+        peru_patterns = (
+            "habla peruano",
+            "hablame peruano",
+            "háblame peruano",
+            "modo peru",
+            "modo peruano",
+            "espanol peruano",
+            "español peruano",
+        )
+        if ChatService._contains_any(text_n, peru_patterns):
+            return "pe"
+        return None
+
+    @staticmethod
+    def _maybe_update_locale(db: Session, text_n: str) -> str | None:
+        detected = ChatService._detect_locale_preference(text_n)
+        if not detected:
+            return None
+        ChatService._set_locale(db, detected)
+        return "Ya está, desde ahora te hablo en español peruano, más natural y a tu estilo."
 
     @staticmethod
     def _detect_tone_preference(text_n: str) -> str | None:
@@ -189,9 +398,20 @@ class ChatService:
         return "Perfecto. Desde ahora te responderé en un tono más cercano y casual."
 
     @staticmethod
-    def _tone_pick(db: Session, casual: tuple[str, ...], formal: tuple[str, ...]) -> str:
+    def _tone_pick(
+        db: Session,
+        casual: tuple[str, ...],
+        formal: tuple[str, ...],
+        peru_casual: tuple[str, ...] | None = None,
+    ) -> str:
         tone = ChatService._get_tone(db)
-        return ChatService._choose(formal if tone == "formal" else casual)
+        if tone == "formal":
+            return ChatService._choose(formal)
+
+        locale = ChatService._get_locale(db)
+        if locale == "pe" and peru_casual:
+            return ChatService._choose(peru_casual)
+        return ChatService._choose(casual)
 
     @staticmethod
     def _extract_qty(text: str, default: float = 1.0) -> float:
@@ -452,6 +672,11 @@ class ChatService:
                     "Hola, con gusto te ayudo. Indícame qué deseas revisar.",
                     "Buenos días. Estoy disponible para asistirte con inventario y recordatorios.",
                 ),
+                (
+                    "¡Hola, causa! ¿Qué hacemos hoy en la casa?",
+                    "¡Hola! Todo bien por acá. Dime nomás y lo vemos al toque.",
+                    "¡Qué tal! Te ayudo con inventario, compras, alertas y todo lo de la jato.",
+                ),
             )
 
         if ChatService._contains_any(text_n, ChatService.MOOD_HINTS):
@@ -488,6 +713,11 @@ class ChatService:
                     "Ha sido un placer ayudarte.",
                     "De nada. Si deseas, continuamos con lo siguiente.",
                 ),
+                (
+                    "¡De nada! Para eso estamos.",
+                    "Todo bien, cuando quieras seguimos.",
+                    "Dale, cualquier cosa me avisas y lo vemos.",
+                ),
             )
 
         if ChatService._contains_any(text_n, ChatService.GOODBYE_HINTS):
@@ -502,6 +732,11 @@ class ChatService:
                     "Perfecto, quedo atenta. Hasta luego.",
                     "De acuerdo. Estaré disponible cuando lo necesites.",
                     "Conforme. Nos vemos más tarde.",
+                ),
+                (
+                    "Ya está, cualquier cosa me escribes. ¡Nos vemos!",
+                    "Listo, te dejo tranqui. ¡Hablamos!",
+                    "Dale, quedo atenta por si sale algo más.",
                 ),
             )
 
@@ -518,6 +753,12 @@ class ChatService:
                     "Puedo ayudarte con órdenes en lenguaje natural. Por ejemplo: "
                     "'compré 2 leches a 5.50', 'consumí 1 yogurt', 'agrega 3 huevos', "
                     "'inventario actual', 'resumen diario' o "
+                    "'recuerda que mi bebida favorita es café'.",
+                ),
+                (
+                    "Te ayudo al toque. Puedes decirme: "
+                    "'compré 2 leches a 5.50', 'gasté 1 yogurt', 'agrega 3 huevos', "
+                    "'resumen diario', 'lista de compras' o "
                     "'recuerda que mi bebida favorita es café'.",
                 ),
             )
@@ -836,11 +1077,24 @@ class ChatService:
             lines.append(
                 f"- {product.name}: {ChatService._fmt_num(product.stock_current)} {product.unit} ({product.location or 'sin ubicación'}){status_hint}"
             )
-        intro = ChatService._choose((
-            "Esto es lo que tienes en casa:",
-            "Te paso tu inventario actual:",
-            "Así va tu inventario ahora mismo:",
-        ))
+        intro = ChatService._tone_pick(
+            db,
+            (
+                "Esto es lo que tienes en casa:",
+                "Te paso tu inventario actual:",
+                "Así va tu inventario ahora mismo:",
+            ),
+            (
+                "Este es su inventario actual:",
+                "Le comparto su inventario actual:",
+                "Así se encuentra su inventario en este momento:",
+            ),
+            (
+                "Esto tienes en la casa ahorita:",
+                "Te paso cómo va tu inventario, causa:",
+                "Así está tu stock por ahora:",
+            ),
+        )
         return intro + "\n" + "\n".join(lines)
 
     @staticmethod
@@ -1036,104 +1290,110 @@ class ChatService:
     def reply(db: Session, message: str) -> str:
         text = message.strip()
         text_n = ChatService._normalize(text)
+        text_i = ChatService._canonicalize_intent_text(text_n)
 
-        # 0. Conversational tone preference
-        tone_reply = ChatService._maybe_update_tone(db, text_n)
+        # 0. Locale preference
+        locale_reply = ChatService._maybe_update_locale(db, text_i)
+        if locale_reply:
+            return locale_reply
+
+        # 1. Conversational tone preference
+        tone_reply = ChatService._maybe_update_tone(db, text_i)
         if tone_reply:
             return tone_reply
 
-        # 1. Pending confirmation takes priority
-        pending_reply = ChatService._try_pending_confirmation(db, text_n)
+        # 2. Pending confirmation takes priority
+        pending_reply = ChatService._try_pending_confirmation(db, text_i)
         if pending_reply:
             return pending_reply
 
-        # 2. Social / conversational
-        social_reply = ChatService._try_social_reply(db, text_n)
+        # 3. Social / conversational
+        social_reply = ChatService._try_social_reply(db, text_i)
         if social_reply:
             return social_reply
 
         # 3. Memory save
-        memory_reply = ChatService._try_memory_natural(db, text, text_n)
+        memory_reply = ChatService._try_memory_natural(db, text, text_i)
         if memory_reply:
             return memory_reply
 
         # 4. Household reminder save
-        household_save_reply = ChatService._try_save_household_reminder(db, text, text_n)
+        household_save_reply = ChatService._try_save_household_reminder(db, text, text_i)
         if household_save_reply:
             return household_save_reply
 
         # 5. Memory delete
-        delete_memory_reply = ChatService._try_delete_memory(db, text_n)
+        delete_memory_reply = ChatService._try_delete_memory(db, text_i)
         if delete_memory_reply:
             return delete_memory_reply
 
         # 6. Update location
-        location_reply = ChatService._try_update_location(db, text_n)
+        location_reply = ChatService._try_update_location(db, text_i)
         if location_reply:
             return location_reply
 
         # 7. Delete from inventory
-        delete_product_reply = ChatService._try_delete_product(db, text_n)
+        delete_product_reply = ChatService._try_delete_product(db, text_i)
         if delete_product_reply:
             return delete_product_reply
 
         # 8. Add to / create in inventory
-        add_reply = ChatService._try_add_or_create(db, text, text_n)
+        add_reply = ChatService._try_add_or_create(db, text, text_i)
         if add_reply:
             return add_reply
 
         # 9. Daily summary
-        if ChatService._contains_any(text_n, ChatService.DAILY_SUMMARY_HINTS):
+        if ChatService._contains_any(text_i, ChatService.DAILY_SUMMARY_HINTS):
             return ChatService._build_daily_summary_reply(db)
 
         # 10. Recipes
-        if ChatService._contains_any(text_n, ChatService.RECIPE_HINTS):
+        if ChatService._contains_any(text_i, ChatService.RECIPE_HINTS):
             return ChatService._build_recipes_reply(db)
 
         # 11. Household reminders list
-        if ChatService._contains_any(text_n, ChatService.HOUSEHOLD_REMINDER_HINTS):
+        if ChatService._contains_any(text_i, ChatService.HOUSEHOLD_REMINDER_HINTS):
             return ChatService._build_household_reminders_reply(db)
 
         # 12. Shopping list
-        if ChatService._contains_any(text_n, ChatService.SHOPPING_LIST_HINTS):
+        if ChatService._contains_any(text_i, ChatService.SHOPPING_LIST_HINTS):
             return ChatService._build_shopping_list_reply(db)
 
         # 13. Daily alerts
-        if ChatService._contains_any(text_n, ChatService.DAILY_ALERT_HINTS):
+        if ChatService._contains_any(text_i, ChatService.DAILY_ALERT_HINTS):
             return ChatService._build_daily_alerts_reply(db)
 
         # 14. Expenses
-        if ChatService._contains_any(text_n, ChatService.EXPENSE_HINTS):
+        if ChatService._contains_any(text_i, ChatService.EXPENSE_HINTS):
             return ChatService._build_expense_reply(db)
 
         # 15. Important memories
-        if ChatService._contains_any(text_n, ChatService.IMPORTANT_MEMORY_HINTS):
+        if ChatService._contains_any(text_i, ChatService.IMPORTANT_MEMORY_HINTS):
             return ChatService._build_important_memories_reply(db)
 
         # 16. Consume first
-        if ChatService._contains_any(text_n, ChatService.CONSUME_FIRST_HINTS):
+        if ChatService._contains_any(text_i, ChatService.CONSUME_FIRST_HINTS):
             return ChatService._build_consume_first_reply(db)
 
         # 17. Buy
-        buy_reply = ChatService._try_buy_or_consume(db, text, text_n, consume=False)
+        buy_reply = ChatService._try_buy_or_consume(db, text, text_i, consume=False)
         if buy_reply:
             return buy_reply
 
         # 18. Consume
-        consume_reply = ChatService._try_buy_or_consume(db, text, text_n, consume=True)
+        consume_reply = ChatService._try_buy_or_consume(db, text, text_i, consume=True)
         if consume_reply:
             return consume_reply
 
         # 19. Inventory list
-        if ChatService._contains_any(text_n, ChatService.INVENTORY_HINTS):
+        if ChatService._contains_any(text_i, ChatService.INVENTORY_HINTS):
             return ChatService._build_inventory_reply(db)
 
         # 20. Products expiring / expired
-        if ChatService._contains_any(text_n, ChatService.EXPIRING_HINTS):
+        if ChatService._contains_any(text_i, ChatService.EXPIRING_HINTS):
             return ChatService._build_expiring_reply(db)
 
         # 17. Alerts
-        if ChatService._contains_any(text_n, ChatService.ALERT_HINTS):
+        if ChatService._contains_any(text_i, ChatService.ALERT_HINTS):
             alerts = AlertService.build_alerts(db)
             chunks: list = []
             if alerts.expired:
@@ -1168,7 +1428,7 @@ class ChatService:
             return "\n\n".join(chunks) if chunks else "Todo está bien: sin stock bajo ni productos por vencer pronto."
 
         # 18. Memory recall
-        if ChatService._contains_any(text_n, ChatService.MEMORY_HINTS):
+        if ChatService._contains_any(text_i, ChatService.MEMORY_HINTS):
             items = MemoryService.list_items(db)
             if not items:
                 return "Aún no tengo recuerdos guardados sobre tus preferencias."
@@ -1186,6 +1446,12 @@ class ChatService:
                 (
                     "No logré interpretar esa solicitud con claridad. Puedes probar con algo como: "
                     "'compré 2 leches a 5.50', 'consumí 1 yogurt', 'agrega 3 huevos', "
+                    "'resumen diario', 'recetas según inventario' o "
+                    "'recuerda que mi bebida favorita es café'.",
+                ),
+                (
+                    "No te entendí bien esta vez, pero lo sacamos en una. Prueba con algo como: "
+                    "'compré 2 leches a 5.50', 'gasté 1 yogurt', 'agrega 3 huevos', "
                     "'resumen diario', 'recetas según inventario' o "
                     "'recuerda que mi bebida favorita es café'.",
                 ),

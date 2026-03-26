@@ -167,17 +167,41 @@ class ChatService:
     @staticmethod
     def _try_pending_confirmation(db: Session, text_n: str) -> str | None:
         """Execute or cancel a previously stored pending action."""
-        if not _PENDING:
-            return None
+        import json
+        from app.models.entities import MemoryItem
+        
+        # Busca estado pendiente en DB first
+        pending = None
+        try:
+            item = db.query(MemoryItem).filter_by(key="__pending_create__").first()
+            if item:
+                pending = json.loads(item.value)
+        except:
+            pass
+        
+        # Fallback a memoria global
+        if not pending:
+            if not _PENDING:
+                return None
+            pending = dict(_PENDING)
 
         if ChatService._contains_any(text_n, ChatService.CONFIRM_HINTS):
-            pending = dict(_PENDING)
-            _PENDING.clear()
-
             if pending.get("action") == "create_product":
                 name = pending["name"]
                 qty = pending.get("qty", 0.0)
                 unit = pending.get("unit", "unidad")
+                
+                # Limpia el estado pendiente
+                try:
+                    db.query(MemoryItem).filter_by(key="__pending_create__").delete()
+                    db.commit()
+                except:
+                    pass
+                
+                global _PENDING
+                _PENDING.clear()
+                
+                # Crea el producto
                 created = ProductService.create_product(
                     db,
                     ProductCreate(
@@ -201,12 +225,22 @@ class ChatService:
             return "Acción confirmada, pero no encontré qué hacer. Cuéntame de nuevo."
 
         if ChatService._contains_any(text_n, ChatService.DENY_HINTS):
-            pending_name = _PENDING.get("name", "el producto")
+            pending_name = pending.get("name", "el producto")
+            
+            # Limpia el estado
+            try:
+                db.query(MemoryItem).filter_by(key="__pending_create__").delete()
+                db.commit()
+            except:
+                pass
+            
+            global _PENDING
             _PENDING.clear()
+            
             return f"Entendido, no creé {pending_name}. Avísame si cambias de idea."
 
         # Pending exists but user said something unrelated — remind them.
-        pending_name = _PENDING.get("name", "el producto")
+        pending_name = pending.get("name", "el producto")
         return (
             f"Antes de seguir: ¿quieres que cree {pending_name} en el inventario? "
             f"Dime sí o no."
@@ -325,12 +359,12 @@ class ChatService:
     @staticmethod
     def _try_add_or_create(db: Session, text: str, text_n: str) -> str | None:
         """
-        - Strict PRODUCT_CMD format  -> always create.
+        - Strict PRODUCT_CMD format  → always create.
         - Natural 'agrega X':
-            * Product exists   -> increase stock (counter).
-            * Product missing  -> ask confirmation before creating.
+            • Product exists   → increase stock (counter).
+            • Product missing  → ask confirmation before creating.
         """
-        # Strict structured command
+        # ── Strict structured command ────────────────────────────────
         strict_match = ChatService.PRODUCT_CMD.fullmatch(text)
         if strict_match:
             data = strict_match.groupdict()
@@ -359,7 +393,7 @@ class ChatService:
             )
             return f"Listo. Creé {created.name} con stock {ChatService._fmt_num(created.stock_current)} {created.unit}."
 
-        # Natural language
+        # ── Natural language ─────────────────────────────────────────
         if not ChatService._contains_any(text_n, ChatService.ACTION_ADD):
             return None
 
@@ -382,7 +416,7 @@ class ChatService:
 
         existing = ChatService._find_product_flexible(db, name)
 
-        # Product EXISTS -> increase stock
+        # ── Product EXISTS → increase stock ──────────────────────────
         if existing:
             add_qty = qty if qty > 0 else 1.0
             before = existing.stock_current
@@ -395,11 +429,27 @@ class ChatService:
                 f"Antes tenías {ChatService._fmt_num(before)} y ahora tienes {after} {unit}."
             )
 
-        # Product DOES NOT EXIST -> ask confirmation
+        # ── Product DOES NOT EXIST → ask confirmation ─────────────────
+        import json
+        from app.models.schemas import MemoryCreate
+        
         _PENDING["action"] = "create_product"
         _PENDING["name"] = name
         _PENDING["qty"] = qty
         _PENDING["unit"] = "unidad"
+
+        # Save pending state to DB for persistence across requests
+        try:
+            from app.services.memory_service import MemoryService
+            MemoryService.save_item(
+                db,
+                MemoryCreate(
+                    key="__pending_create__",
+                    value=json.dumps(_PENDING)
+                )
+            )
+        except Exception as e:
+            print(f"Warning: Could not save pending state to DB: {e}")
 
         qty_hint = f" con {ChatService._fmt_num(qty)} unidades de entrada" if qty > 0 else ""
         return (

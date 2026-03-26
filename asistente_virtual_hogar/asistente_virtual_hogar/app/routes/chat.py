@@ -10,4 +10,16 @@ router = APIRouter(prefix="/chat", tags=["Chat"])
 
 @router.post("", response_model=ChatResponse)
 def chat(payload: ChatMessage, db: Session = Depends(get_db)):
-    return ChatResponse(reply=ChatService.reply(db, payload.message))
+    try:
+        return ChatResponse(reply=ChatService.reply(db, payload.message))
+    except Exception:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        return ChatResponse(
+            reply=(
+                "Tuve un problema interno al procesar ese mensaje. "
+                "Inténtalo de nuevo con: 'agrega nombre_del_producto'."
+            )
+        )

@@ -278,6 +278,7 @@ class ChatService:
                         db.rollback()
                     except Exception:
                         pass
+                    _clear_pending_state()
                     return (
                         "Se me complicó confirmar ese producto en este momento. "
                         "Inténtalo otra vez con: 'agrega nombre_del_producto'."
@@ -290,6 +291,11 @@ class ChatService:
             _clear_pending_state()
             
             return f"Entendido, no creé {pending_name}. Avísame si cambias de idea."
+
+        # If user starts a new add/create command, replace stale pending instead of blocking.
+        if ChatService._contains_any(text_n, ChatService.ACTION_ADD):
+            _clear_pending_state()
+            return None
 
         # Pending exists but user said something unrelated — remind them.
         pending_name = pending.get("name", "el producto")

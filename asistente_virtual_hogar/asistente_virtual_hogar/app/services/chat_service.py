@@ -144,6 +144,21 @@ class ChatService:
         "comparte la lista",
         "pasame la lista",
         "pásame la lista",
+        "envia dashboard",
+        "enviar dashboard",
+        "envia reporte",
+        "enviar reporte",
+        "envia gastos",
+        "enviar gastos",
+        "manda reporte",
+        "mandame reporte",
+        "envia dashboard",
+        "manda dashboard",
+        "mandame dashboard",
+        "comparte dashboard",
+        "compartir dashboard",
+        "enviame reporte",
+        "enviame dashboard",
     )
 
     HOUSEHOLD_DEFAULT_REMINDERS = (
@@ -1552,13 +1567,25 @@ class ChatService:
     @staticmethod
     def _build_shopping_list_share_text(db: Session) -> str | None:
         alerts = AlertService.build_alerts(db)
+        expenses = PurchaseService.summarize_expenses(db, days=30)
+
+        lines: list[str] = ["Dashboard del hogar"]
+        lines.append("")
+        lines.append("Gastos (30 dias):")
+        lines.append(f"- Total: {ChatService._fmt_num(expenses.total_amount)}")
+        lines.append(f"- Compras con precio: {expenses.items_with_price}/{expenses.purchases_count}")
+        lines.append("")
+        lines.append("Lista de compras:")
+
         if not alerts.shopping_list:
-            return None
-        lines = [
-            f"- {item.product_name}: {ChatService._fmt_num(item.needed_quantity)} {item.unit}"
-            for item in alerts.shopping_list
-        ]
-        return "Lista de compras del hogar:\n" + "\n".join(lines)
+            lines.append("- Sin faltantes por ahora")
+        else:
+            for item in alerts.shopping_list:
+                lines.append(f"- {item.product_name}: {ChatService._fmt_num(item.needed_quantity)} {item.unit}")
+
+        lines.append("")
+        lines.append("PDF del dashboard: /dashboard/pdf")
+        return "\n".join(lines)
 
     @staticmethod
     def _try_share_shopping_list(db: Session, text_n: str) -> str | None:
@@ -1566,30 +1593,34 @@ class ChatService:
             return None
 
         share_text = ChatService._build_shopping_list_share_text(db)
-        if not share_text:
-            return "Tu lista de compras está vacía por ahora, así que no hay nada para enviar."
-
         encoded = quote(share_text)
         wants_whatsapp = "whatsapp" in text_n or "wsp" in text_n or "wtspp" in text_n
         wants_email = "correo" in text_n or "mail" in text_n or "email" in text_n
         wants_telegram = "telegram" in text_n
+        wants_auto = "automatic" in text_n
 
         if wants_email:
+            auto_note = "\nEnvio automático real por correo requiere configurar un proveedor SMTP/API." if wants_auto else ""
             return (
                 "Listo, aquí tienes para enviarlo por correo:\n"
-                f"mailto:?subject=Lista%20de%20compras&body={encoded}"
+                f"mailto:?subject=Dashboard%20hogar&body={encoded}"
+                f"{auto_note}"
             )
 
         if wants_telegram:
+            auto_note = "\nEnvio automático real por Telegram requiere bot token y chat_id." if wants_auto else ""
             return (
                 "Listo, aquí tienes para compartir por Telegram:\n"
                 f"https://t.me/share/url?url=&text={encoded}"
+                f"{auto_note}"
             )
 
         if wants_whatsapp or True:
+            auto_note = "\nEnvio automático real por WhatsApp requiere API (Meta/Twilio)." if wants_auto else ""
             return (
-                "Listo, aquí tienes para compartir por WhatsApp:\n"
+                "Listo, aquí tienes para compartir por WhatsApp (dashboard + gastos + faltantes):\n"
                 f"https://wa.me/?text={encoded}"
+                f"{auto_note}"
             )
 
     @staticmethod

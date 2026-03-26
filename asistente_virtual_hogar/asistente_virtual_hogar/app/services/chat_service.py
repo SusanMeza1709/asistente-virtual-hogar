@@ -1,3 +1,4 @@
+import os
 import re
 import random
 import unicodedata
@@ -15,6 +16,7 @@ from app.services.inventory_service import InventoryService
 from app.services.memory_service import MemoryService
 from app.services.product_service import ProductService
 from app.services.purchase_service import PurchaseService
+from app.services.whatsapp_service import WhatsAppService
 
 # ---------------------------------------------------------------------------
 # Pending-action state (single-user home assistant — in-memory is fine)
@@ -289,6 +291,7 @@ class ChatService:
 
     TONE_KEY = "__chat_tone__"
     LOCALE_KEY = "__chat_locale__"
+    WHATSAPP_TO_KEY = "__whatsapp_to__"
     # Confirmation / denial
     CONFIRM_HINTS = (
         "si", "sí", "claro", "dale", "ok", "afirmativo", "por supuesto",
@@ -406,6 +409,36 @@ class ChatService:
             return None
         ChatService._set_locale(db, detected)
         return "Ya está, desde ahora te hablo en español peruano, más natural y a tu estilo."
+
+    @staticmethod
+    def _extract_phone_number(text_n: str) -> str | None:
+        match = re.search(r"(?:\+?51\s*)?(9\d{8})", text_n)
+        if not match:
+            return None
+        return "51" + match.group(1)
+
+    @staticmethod
+    def _get_default_whatsapp_to(db: Session) -> str | None:
+        saved = MemoryService.get_by_key(db, ChatService.WHATSAPP_TO_KEY)
+        if saved and saved.value.strip():
+            return saved.value.strip()
+
+        env_phone = (os.getenv("DEFAULT_WHATSAPP_TO") or "").strip()
+        if env_phone:
+            return env_phone
+        return None
+
+    @staticmethod
+    def _try_set_whatsapp_number(db: Session, text_n: str) -> str | None:
+        if not re.search(r"(?:mi\s+)?(?:numero|n[uú]mero)\s+.*whatsapp|whatsapp\s+es", text_n):
+            return None
+
+        phone = ChatService._extract_phone_number(text_n)
+        if not phone:
+            return "No encontré un número válido. Dímelo así: 'mi número de WhatsApp es 926342398'."
+
+        MemoryService.save_item(db, MemoryCreate(key=ChatService.WHATSAPP_TO_KEY, value=phone))
+        return f"Listo. Guardé tu WhatsApp de destino: +{phone}."
 
     @staticmethod
     def _detect_tone_preference(text_n: str) -> str | None:
@@ -1599,6 +1632,27 @@ class ChatService:
         wants_telegram = "telegram" in text_n
         wants_auto = "automatic" in text_n
 
+        target_phone = ChatService._extract_phone_number(text_n) or ChatService._get_default_whatsapp_to(db)
+
+        if wants_auto and (wants_whatsapp or not wants_email and not wants_telegram):
+            if not target_phone:
+                return (
+                    "Para envío automático por WhatsApp necesito tu número destino. "
+                    "Dímelo así: 'mi número de WhatsApp es 926342398'."
+                )
+
+            sent, detail = WhatsAppService.send_message(share_text, target_phone)
+            if sent:
+                return f"Listo, te lo envié automáticamente por WhatsApp a +{target_phone}."
+
+            fallback = (
+                "No pude enviarlo automáticamente todavía. "
+                f"Detalle: {detail}\n"
+                "Mientras tanto, aquí tienes el link manual:\n"
+                f"https://wa.me/{target_phone}?text={encoded}"
+            )
+            return fallback
+
         if wants_email:
             auto_note = "\nEnvio automático real por correo requiere configurar un proveedor SMTP/API." if wants_auto else ""
             return (
@@ -1617,9 +1671,11 @@ class ChatService:
 
         if wants_whatsapp or True:
             auto_note = "\nEnvio automático real por WhatsApp requiere API (Meta/Twilio)." if wants_auto else ""
+            target_suffix = target_phone if target_phone else ""
+            wa_base = f"https://wa.me/{target_suffix}?text=" if target_suffix else "https://wa.me/?text="
             return (
                 "Listo, aquí tienes para compartir por WhatsApp (dashboard + gastos + faltantes):\n"
-                f"https://wa.me/?text={encoded}"
+                f"{wa_base}{encoded}"
                 f"{auto_note}"
             )
 
@@ -1783,12 +1839,17 @@ class ChatService:
         text_n = ChatService._normalize(text)
         text_i = ChatService._canonicalize_intent_text(text_n)
 
-        # 0. Locale preference
+        # 0. WhatsApp destination preference
+        whatsapp_number_reply = ChatService._try_set_whatsapp_number(db, text_i)
+        if whatsapp_number_reply:
+            return whatsapp_number_reply
+
+        # 1. Locale preference
         locale_reply = ChatService._maybe_update_locale(db, text_i)
         if locale_reply:
             return locale_reply
 
-        # 1. Conversational tone preference
+        # 2. Conversational tone preference
         tone_reply = ChatService._maybe_update_tone(db, text_i)
         if tone_reply:
             return tone_reply

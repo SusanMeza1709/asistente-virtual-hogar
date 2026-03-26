@@ -204,12 +204,22 @@ class ChatService:
                 if not name:
                     _clear_pending_state()
                     return "No pude identificar qué producto querías crear. Dímelo otra vez con: 'agrega nombre_del_producto'."
+                name = re.sub(r"\s+", " ", name).strip()[:120]
+                if not name:
+                    _clear_pending_state()
+                    return "No pude identificar qué producto querías crear. Dímelo otra vez con: 'agrega nombre_del_producto'."
 
                 try:
                     qty = float(pending.get("qty", 0.0) or 0.0)
                 except Exception:
                     qty = 0.0
+                if qty < 0:
+                    qty = 0.0
+                if qty > 1_000_000:
+                    qty = 1_000_000.0
+
                 unit = str(pending.get("unit", "unidad") or "unidad").strip() or "unidad"
+                unit = re.sub(r"\s+", " ", unit).strip()[:20] or "unidad"
 
                 try:
                     existing = ChatService._find_product_flexible(db, name)
@@ -471,6 +481,14 @@ class ChatService:
         name = ChatService._clean_candidate_name(raw_candidate).title()
         if not name:
             return "Entendí que quieres agregar algo, pero no capté el nombre. ¿Puedes repetirlo?"
+        name = re.sub(r"\s+", " ", name).strip()[:120]
+        if not name:
+            return "Entendí que quieres agregar algo, pero no capté el nombre. ¿Puedes repetirlo?"
+
+        if qty < 0:
+            qty = 0.0
+        if qty > 1_000_000:
+            qty = 1_000_000.0
 
         existing = ChatService._find_product_flexible(db, name)
 

@@ -488,6 +488,46 @@ class ChatService:
         )
 
     @staticmethod
+    def _build_monthly_pdf_share_text(db: Session) -> str:
+        summary = PurchaseService.summarize_expenses(db, days=30)
+        pdf_url = ChatService._dashboard_pdf_url(period_days=30)
+        lines: list[str] = ["Reporte mensual de gastos del hogar - PDF", ""]
+        lines.append("Gastos (ultimos 30 dias):")
+        lines.append(f"- Total: S/ {ChatService._fmt_num(summary.total_amount)}")
+        lines.append(f"- Compras con precio: {summary.items_with_price}/{summary.purchases_count}")
+        lines.append("")
+        lines.append(f"Abre el PDF aquí: {pdf_url}")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _try_send_monthly_pdf_whatsapp(db: Session, text_n: str) -> str | None:
+        if not ("pdf" in text_n or "reporte" in text_n or "gastos del mes" in text_n):
+            return None
+        if not ChatService._contains_any(text_n, ("whatsapp", "wsp", "wtspp", "automatico", "automático")):
+            return None
+
+        target_phone = ChatService._extract_phone_number(text_n) or ChatService._get_default_whatsapp_to(db)
+        if not target_phone:
+            return (
+                "Para envío automático por WhatsApp necesito tu número destino. "
+                "Dímelo así: 'mi número de WhatsApp es 926342398'."
+            )
+
+        share_text = ChatService._build_monthly_pdf_share_text(db)
+        sent, detail = WhatsAppService.send_message(share_text, target_phone)
+        if sent:
+            return f"Listo, te envié el reporte mensual por WhatsApp a +{target_phone}."
+
+        encoded = quote(share_text)
+        fallback = (
+            "No pude enviarlo automáticamente todavía. "
+            f"Detalle: {detail}\n"
+            "Mientras tanto, aquí tienes el link manual:\n"
+            f"https://wa.me/{target_phone}?text={encoded}"
+        )
+        return fallback
+
+    @staticmethod
     def _detect_tone_preference(text_n: str) -> str | None:
         formal_patterns = (
             "habla formal",
@@ -1972,7 +2012,12 @@ class ChatService:
         if ChatService._contains_any(text_i, ChatService.HOUSEHOLD_REMINDER_HINTS):
             return ChatService._build_household_reminders_reply(db)
 
-        # 11.05 Monthly expenses PDF
+        # 11.05 Send monthly PDF via WhatsApp (if requested)
+        send_pdf_whatsapp = ChatService._try_send_monthly_pdf_whatsapp(db, text_i)
+        if send_pdf_whatsapp:
+            return send_pdf_whatsapp
+
+        # 11.06 Monthly expenses PDF (regular link)
         if ChatService._is_monthly_pdf_request(text_i):
             return ChatService._build_monthly_pdf_reply(db)
 

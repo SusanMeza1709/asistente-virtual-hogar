@@ -3,6 +3,7 @@ import unicodedata
 from datetime import datetime
 from difflib import get_close_matches
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.schemas import ConsumptionCreate, MemoryCreate, ProductCreate, PurchaseCreate
@@ -199,9 +200,16 @@ class ChatService:
 
         if ChatService._contains_any(text_n, ChatService.CONFIRM_HINTS):
             if pending.get("action") == "create_product":
-                name = pending["name"]
-                qty = pending.get("qty", 0.0)
-                unit = pending.get("unit", "unidad")
+                name = str(pending.get("name", "")).strip().title()
+                if not name:
+                    _clear_pending_state()
+                    return "No pude identificar qué producto querías crear. Dímelo otra vez con: 'agrega nombre_del_producto'."
+
+                try:
+                    qty = float(pending.get("qty", 0.0) or 0.0)
+                except Exception:
+                    qty = 0.0
+                unit = str(pending.get("unit", "unidad") or "unidad").strip() or "unidad"
 
                 try:
                     existing = ChatService._find_product_flexible(db, name)
@@ -222,15 +230,37 @@ class ChatService:
                             f"Cuando lo compres, avísame y sumo el stock."
                         )
 
-                    created = ProductService.create_product(
-                        db,
-                        ProductCreate(
-                            name=name,
-                            stock_current=qty,
-                            unit=unit,
-                            stock_minimum=1,
-                        ),
-                    )
+                    try:
+                        created = ProductService.create_product(
+                            db,
+                            ProductCreate(
+                                name=name,
+                                stock_current=qty,
+                                unit=unit,
+                                stock_minimum=1,
+                            ),
+                        )
+                    except IntegrityError:
+                        db.rollback()
+                        existing_after_conflict = ChatService._find_product_flexible(db, name)
+                        if existing_after_conflict:
+                            if qty > 0:
+                                before = existing_after_conflict.stock_current
+                                InventoryService.increase_stock(db, existing_after_conflict, qty)
+                                _clear_pending_state()
+                                return (
+                                    f"{existing_after_conflict.name} ya existía. "
+                                    f"Sumé {ChatService._fmt_num(qty)} {existing_after_conflict.unit}. "
+                                    f"Antes tenías {ChatService._fmt_num(before)} y ahora tienes "
+                                    f"{ChatService._fmt_num(existing_after_conflict.stock_current)} {existing_after_conflict.unit}."
+                                )
+                            _clear_pending_state()
+                            return (
+                                f"{existing_after_conflict.name} ya estaba en el inventario. "
+                                f"Cuando lo compres, avísame y sumo el stock."
+                            )
+                        raise
+
                     _clear_pending_state()
 
                     stock_str = ChatService._fmt_num(created.stock_current)

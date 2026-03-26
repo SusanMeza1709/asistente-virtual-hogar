@@ -3,6 +3,7 @@ import random
 import unicodedata
 from datetime import datetime
 from difflib import get_close_matches
+from urllib.parse import quote
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -132,6 +133,18 @@ class ChatService:
     )
     DAILY_SUMMARY_HINTS = ("resumen diario", "resumen del dia", "resumen del día", "resumen diario automatico", "resumen diario automático")
     HOUSEHOLD_REMINDER_HINTS = ("recordatorios del hogar", "recordatorio del hogar", "recordatorios hogar")
+    SHARE_LIST_HINTS = (
+        "envia lista",
+        "enviar lista",
+        "manda lista",
+        "mandame lista",
+        "mandame la lista",
+        "enviame la lista",
+        "envíame la lista",
+        "comparte la lista",
+        "pasame la lista",
+        "pásame la lista",
+    )
 
     HOUSEHOLD_DEFAULT_REMINDERS = (
         "Revisar gas",
@@ -537,6 +550,110 @@ class ChatService:
             if keyword in normalized_name:
                 return unit
         return "unidad"
+
+    @staticmethod
+    def _convert_product_stock_units(product, target_unit: str) -> tuple[float, float] | None:
+        converted_current = ChatService._convert_qty_between_units(product.stock_current, product.unit, target_unit)
+        converted_minimum = ChatService._convert_qty_between_units(product.stock_minimum, product.unit, target_unit)
+        if converted_current is None or converted_minimum is None:
+            return None
+        return converted_current, converted_minimum
+
+    @staticmethod
+    def _try_update_product_unit(db: Session, text_n: str) -> str | None:
+        patterns = [
+            r"(?:cambia|cambiar|actualiza|actualizar|modifica|modificar)\s+(?:la\s+)?(?:unidad|medida)\s+de\s+(?P<name>.+?)\s+(?:a|por)\s+(?P<unit>kilos?|kg|gramos?|g|tarros?|unidades?|litros?|l|docenas?|doc)",
+            r"(?:pon|deja|usar|usa)\s+(?P<name>.+?)\s+(?:en|con)\s+(?P<unit>kilos?|kg|gramos?|g|tarros?|unidades?|litros?|l|docenas?|doc)",
+        ]
+
+        match = None
+        for pattern in patterns:
+            match = re.search(pattern, text_n)
+            if match:
+                break
+        if not match:
+            return None
+
+        name = ChatService._clean_candidate_name(match.group("name")).title()
+        target_unit = ChatService._normalize_unit_label(match.group("unit"))
+        if not name or not target_unit:
+            return "Entendí que quieres cambiar la unidad, pero me faltó el producto o la unidad destino."
+
+        product = ChatService._find_product_flexible(db, name)
+        if not product:
+            return f"No encontré '{name}' en el inventario para cambiar su unidad."
+
+        previous_unit = product.unit
+        if previous_unit == target_unit:
+            return f"{product.name} ya está en {target_unit}."
+
+        converted = ChatService._convert_product_stock_units(product, target_unit)
+        note = ""
+        if converted is not None:
+            current_converted, minimum_converted = converted
+            update_payload = ProductUpdate(
+                unit=target_unit,
+                stock_current=current_converted,
+                stock_minimum=minimum_converted,
+            )
+            note = " Convertí también las cantidades de stock a la nueva unidad."
+        else:
+            update_payload = ProductUpdate(unit=target_unit)
+            note = " No convertí cantidades porque no hay equivalencia matemática directa entre esas unidades."
+
+        ProductService.update_product(db, product, update_payload)
+        return f"Listo. Cambié la unidad de {product.name} de {previous_unit} a {target_unit}.{note}"
+
+    @staticmethod
+    def _try_normalize_all_units(db: Session, text_n: str) -> str | None:
+        normalize_hints = (
+            "normaliza unidades",
+            "normalizar unidades",
+            "corrige unidades",
+            "corregir unidades",
+            "estandariza unidades",
+            "estandarizar unidades",
+            "actualiza unidades de todos",
+            "actualizar unidades de todos",
+            "cambiar unidades de todos",
+            "cambia unidades de todos",
+        )
+        if not ChatService._contains_any(text_n, normalize_hints):
+            return None
+
+        products = ProductService.list_products(db)
+        if not products:
+            return "No hay productos en el inventario para normalizar unidades."
+
+        changed: list[str] = []
+        unchanged = 0
+
+        for product in products:
+            target_unit = ChatService._infer_default_unit(product.name)
+            if target_unit == product.unit:
+                unchanged += 1
+                continue
+
+            converted = ChatService._convert_product_stock_units(product, target_unit)
+            if converted is not None:
+                current_converted, minimum_converted = converted
+                ProductService.update_product(
+                    db,
+                    product,
+                    ProductUpdate(unit=target_unit, stock_current=current_converted, stock_minimum=minimum_converted),
+                )
+                changed.append(f"- {product.name}: {product.unit} -> {target_unit} (conversión aplicada)")
+            else:
+                ProductService.update_product(db, product, ProductUpdate(unit=target_unit))
+                changed.append(f"- {product.name}: {product.unit} -> {target_unit} (sin conversión numérica)")
+
+        if not changed:
+            return "Todo ya estaba con unidades correctas según las reglas actuales."
+
+        header = f"Listo. Normalicé unidades en {len(changed)} producto(s)."
+        if unchanged:
+            header += f" {unchanged} ya estaban correctos."
+        return header + "\n" + "\n".join(changed)
 
     @staticmethod
     def _convert_qty_between_units(qty: float, source_unit: str | None, target_unit: str | None) -> float | None:
@@ -1433,6 +1550,49 @@ class ChatService:
         return "Te armé esta lista de compras:\n" + "\n".join(lines)
 
     @staticmethod
+    def _build_shopping_list_share_text(db: Session) -> str | None:
+        alerts = AlertService.build_alerts(db)
+        if not alerts.shopping_list:
+            return None
+        lines = [
+            f"- {item.product_name}: {ChatService._fmt_num(item.needed_quantity)} {item.unit}"
+            for item in alerts.shopping_list
+        ]
+        return "Lista de compras del hogar:\n" + "\n".join(lines)
+
+    @staticmethod
+    def _try_share_shopping_list(db: Session, text_n: str) -> str | None:
+        if not ChatService._contains_any(text_n, ChatService.SHARE_LIST_HINTS):
+            return None
+
+        share_text = ChatService._build_shopping_list_share_text(db)
+        if not share_text:
+            return "Tu lista de compras está vacía por ahora, así que no hay nada para enviar."
+
+        encoded = quote(share_text)
+        wants_whatsapp = "whatsapp" in text_n or "wsp" in text_n or "wtspp" in text_n
+        wants_email = "correo" in text_n or "mail" in text_n or "email" in text_n
+        wants_telegram = "telegram" in text_n
+
+        if wants_email:
+            return (
+                "Listo, aquí tienes para enviarlo por correo:\n"
+                f"mailto:?subject=Lista%20de%20compras&body={encoded}"
+            )
+
+        if wants_telegram:
+            return (
+                "Listo, aquí tienes para compartir por Telegram:\n"
+                f"https://t.me/share/url?url=&text={encoded}"
+            )
+
+        if wants_whatsapp or True:
+            return (
+                "Listo, aquí tienes para compartir por WhatsApp:\n"
+                f"https://wa.me/?text={encoded}"
+            )
+
+    @staticmethod
     def _build_daily_alerts_reply(db: Session) -> str:
         alerts = AlertService.build_alerts(db)
         chunks: list[str] = []
@@ -1632,6 +1792,16 @@ class ChatService:
         if location_reply:
             return location_reply
 
+        # 6.1 Update product unit
+        unit_reply = ChatService._try_update_product_unit(db, text_i)
+        if unit_reply:
+            return unit_reply
+
+        # 6.2 Normalize all units
+        normalize_units_reply = ChatService._try_normalize_all_units(db, text_i)
+        if normalize_units_reply:
+            return normalize_units_reply
+
         # 7. Delete from inventory
         delete_product_reply = ChatService._try_delete_product(db, text_i)
         if delete_product_reply:
@@ -1653,6 +1823,11 @@ class ChatService:
         # 11. Household reminders list
         if ChatService._contains_any(text_i, ChatService.HOUSEHOLD_REMINDER_HINTS):
             return ChatService._build_household_reminders_reply(db)
+
+        # 11.1 Share shopping list
+        share_list_reply = ChatService._try_share_shopping_list(db, text_i)
+        if share_list_reply:
+            return share_list_reply
 
         # 12. Shopping list
         if ChatService._contains_any(text_i, ChatService.SHOPPING_LIST_HINTS):

@@ -593,8 +593,28 @@ class ChatService:
     @staticmethod
     def _extract_qty(text: str, default: float = 1.0) -> float:
         qty_with_unit = ChatService._extract_qty_and_unit(text)
-        if qty_with_unit: 
-            return qty_with_unit 
+        if qty_with_unit:
+            return qty_with_unit[0]
+
+        number_words = {
+            "cero": 0,
+            "un": 1,
+            "uno": 1,
+            "una": 1,
+            "dos": 2,
+            "tres": 3,
+            "cuatro": 4,
+            "cinco": 5,
+            "seis": 6,
+            "siete": 7,
+            "ocho": 8,
+            "nueve": 9,
+            "diez": 10,
+        }
+        normalized = ChatService._normalize(text)
+        for token, value in number_words.items():
+            if re.search(rf"\b{token}\b", normalized):
+                return float(value)
 
         for word, value in (("medio", 0.5), ("media", 0.5), ("cuarto", 0.25)):
             if re.search(rf"\b{word}\b", text):
@@ -648,6 +668,29 @@ class ChatService:
     @staticmethod
     def _extract_qty_and_unit(text: str) -> tuple[float, str | None] | None:
         normalized = ChatService._normalize(text)
+        word_number_map = {
+            "un": 1,
+            "uno": 1,
+            "una": 1,
+            "dos": 2,
+            "tres": 3,
+            "cuatro": 4,
+            "cinco": 5,
+            "seis": 6,
+            "siete": 7,
+            "ocho": 8,
+            "nueve": 9,
+            "diez": 10,
+        }
+
+        word_numeric = re.search(
+            r"\b(?P<qty>un|uno|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\s*(?P<unit>kilos?|kg|gramos?|g|tarros?|unidades?|litros?|l|docenas?|doc)\b",
+            normalized,
+        )
+        if word_numeric:
+            qty = float(word_number_map[word_numeric.group("qty")])
+            unit = ChatService._normalize_unit_label(word_numeric.group("unit"))
+            return qty, unit
         mixed_worded = re.search(
             r"\b(?P<int>\d+)\s*(?P<unit>kilos?|kg|gramos?|g|tarros?|unidades?|litros?|l|docenas?|doc)\s+y\s+(?P<word>medio|media|cuarto)\b",
             normalized,
@@ -698,6 +741,39 @@ class ChatService:
             return qty, unit
 
         return None
+
+    @staticmethod
+    def _is_total_price_phrase(text_n: str, qty: float) -> bool:
+        if qty <= 0:
+            return False
+        unit_price_hints = (
+            "c/u",
+            "cada",
+            "precio unitario",
+            "por kilo",
+            "por kg",
+            "por unidad",
+            "por docena",
+            "por litro",
+        )
+        if ChatService._contains_any(text_n, unit_price_hints):
+            return False
+
+        # In natural speech, totals are most common when quantity is fractional
+        # (e.g., "medio kilo ... a 3.50"). Whole quantities are usually unit price.
+        fractional_hint = (
+            qty < 1
+            or ChatService._contains_any(text_n, ("medio", "media", "cuarto", "1/2", "1/4", "3/4"))
+        )
+        if not fractional_hint:
+            return False
+
+        if re.search(
+            r"\b(?:a|por|costo|cost[óo]|me\s+costo|me\s+cost[óo])\s+(?:s\/|s\.)?\s*(?:\d+(?:[.,]\d+)?|un\s+sol|\d+\s+sol(?:es)?(?:\s+con\s+\d{1,2}\s+centimos?)?|\d+\s+sol(?:es)?\s+\d{1,2}(?:\s+centimos?)?)\b",
+            text_n,
+        ):
+            return True
+        return False
 
     @staticmethod
     def _extract_add_qty_and_unit(text_n: str, raw_candidate: str) -> tuple[float, str | None]:
@@ -1049,7 +1125,7 @@ class ChatService:
                 unit = re.sub(r"\s+", " ", unit).strip()[:20] or "unidad"
 
                 try:
-                    existing = ChatService._find_product_flexible(db, name)
+                    existing = ChatService._find_product_exact(db, name)
                     if existing:
                         if qty > 0:
                             before = existing.stock_current
@@ -1081,7 +1157,7 @@ class ChatService:
                         )
                     except IntegrityError:
                         db.rollback()
-                        existing_after_conflict = ChatService._find_product_flexible(db, name)
+                        existing_after_conflict = ChatService._find_product_exact(db, name)
                         if existing_after_conflict:
                             if qty > 0:
                                 before = existing_after_conflict.stock_current
@@ -1373,6 +1449,7 @@ class ChatService:
         qty: float
         name: str
         unit_price: float | None = None
+        reference_qty: float | None = None
         input_unit: str | None = None
 
         if match:
@@ -1411,6 +1488,15 @@ class ChatService:
                     )
                 qty = ChatService._extract_qty(qty_source, default=1.0)
 
+            if (
+                not consume
+                and unit_price is not None
+                and reference_qty is None
+                and ChatService._is_total_price_phrase(text_n, qty)
+                and qty > 0
+            ):
+                unit_price = unit_price / qty
+
             action_pattern = "|".join(actions)
             reduced = text_n
             if not implicit_purchase:
@@ -1423,7 +1509,7 @@ class ChatService:
             )
             reduced = re.sub(r"\b\d+\s*/\s*\d+\b", " ", reduced)
             reduced = re.sub(r"\b\d+(?:[.,]\d+)?\b", " ", reduced)
-            reduced = re.sub(r"\b(?:medio|media|cuarto|kilo|kilos|kg|gramo|gramos|g|tarro|tarros|unidad|unidades|docena|docenas|litro|litros|el|la|los|las|sol|soles|centimo|centimos|con|y)\b", " ", reduced)
+            reduced = re.sub(r"\b(?:un|uno|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|medio|media|cuarto|kilo|kilos|kg|gramo|gramos|g|tarro|tarros|unidad|unidades|docena|docenas|litro|litros|el|la|los|las|sol|soles|centimo|centimos|con|y)\b", " ", reduced)
             name = ChatService._clean_candidate_name(reduced)
             if not name:
                 if consume:

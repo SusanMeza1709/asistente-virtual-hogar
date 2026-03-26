@@ -23,7 +23,7 @@ class WhatsAppService:
         )
 
     @staticmethod
-    def send_message(message: str, to_number: str) -> tuple[bool, str]:
+    def send_message(message: str, to_number: str, media_url: str | None = None) -> tuple[bool, str]:
         account_sid = os.getenv("TWILIO_ACCOUNT_SID", "").strip()
         auth_token = os.getenv("TWILIO_AUTH_TOKEN", "").strip()
         from_number = os.getenv("TWILIO_WHATSAPP_FROM", "").strip()
@@ -41,13 +41,15 @@ class WhatsAppService:
         from_formatted = from_number if from_number.startswith("whatsapp:") else f"whatsapp:{from_number}"
 
         url = f"https://api.twilio.com/2010-04-01/Accounts/{account_sid}/Messages.json"
-        payload = urllib.parse.urlencode(
-            {
-                "From": from_formatted,
-                "To": to_formatted,
-                "Body": message,
-            }
-        ).encode("utf-8")
+        payload_data = {
+            "From": from_formatted,
+            "To": to_formatted,
+            "Body": message,
+        }
+        if media_url:
+            payload_data["MediaUrl"] = media_url
+
+        payload = urllib.parse.urlencode(payload_data).encode("utf-8")
 
         token = base64.b64encode(f"{account_sid}:{auth_token}".encode("utf-8")).decode("ascii")
         request = urllib.request.Request(url, data=payload, method="POST")

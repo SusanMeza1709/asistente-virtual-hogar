@@ -514,9 +514,20 @@ class ChatService:
             )
 
         share_text = ChatService._build_monthly_pdf_share_text(db)
-        sent, detail = WhatsAppService.send_message(share_text, target_phone)
+        pdf_url = ChatService._dashboard_pdf_url(period_days=30)
+        if not pdf_url.startswith(("http://", "https://")):
+            return (
+                "Para enviarte el PDF como documento por WhatsApp necesito una URL pública. "
+                "Configura APP_BASE_URL en Render (por ejemplo, https://tu-app.onrender.com)."
+            )
+
+        sent, detail = WhatsAppService.send_message(
+            "Te envío tu reporte mensual en PDF adjunto.",
+            target_phone,
+            media_url=pdf_url,
+        )
         if sent:
-            return f"Listo, te envié el reporte mensual por WhatsApp a +{target_phone}."
+            return f"Listo, te envié el documento PDF mensual por WhatsApp a +{target_phone}."
 
         encoded = quote(share_text)
         fallback = (
@@ -1736,8 +1747,18 @@ class ChatService:
                     "Dímelo así: 'mi número de WhatsApp es 926342398'."
                 )
 
-            sent, detail = WhatsAppService.send_message(share_text, target_phone)
+            media_url = None
+            message_body = share_text
+            if wants_report:
+                candidate_pdf = ChatService._dashboard_pdf_url(period_days=30)
+                if candidate_pdf.startswith(("http://", "https://")):
+                    media_url = candidate_pdf
+                    message_body = "Te envío tu reporte mensual en PDF adjunto."
+
+            sent, detail = WhatsAppService.send_message(message_body, target_phone, media_url=media_url)
             if sent:
+                if media_url:
+                    return f"Listo, te envié el PDF mensual por WhatsApp a +{target_phone}."
                 return f"Listo, te lo envié automáticamente por WhatsApp a +{target_phone}."
 
             fallback = (

@@ -480,6 +480,8 @@ class ChatService:
             return "litro"
         if value in ("unidad", "unidades", "u"):
             return "unidad"
+        if value in ("docena", "docenas", "doc"):
+            return "docena"
         if value in ("tarro", "tarros"):
             return "tarro"
         return value
@@ -487,7 +489,10 @@ class ChatService:
     @staticmethod
     def _extract_qty_and_unit(text: str) -> tuple[float, str | None] | None:
         normalized = ChatService._normalize(text)
-        mixed = re.search(r"\b(?P<int>\d+)\s+(?P<frac>\d+\s*/\s*\d+)\s*(?P<unit>kilos?|kg|tarros?|unidades?|litros?|l)?\b", normalized)
+        mixed = re.search(
+            r"\b(?P<int>\d+)\s+(?P<frac>\d+\s*/\s*\d+)\s*(?P<unit>kilos?|kg|gramos?|g|tarros?|unidades?|litros?|l|docenas?|doc)?\b",
+            normalized,
+        )
         if mixed:
             frac = ChatService._parse_fraction(mixed.group("frac"))
             if frac is not None:
@@ -495,20 +500,29 @@ class ChatService:
                 unit = ChatService._normalize_unit_label(mixed.group("unit"))
                 return whole + frac, unit
 
-        fraction = re.search(r"\b(?P<frac>\d+\s*/\s*\d+)\s*(?P<unit>kilos?|kg|tarros?|unidades?|litros?|l)?\b", normalized)
+        fraction = re.search(
+            r"\b(?P<frac>\d+\s*/\s*\d+)\s*(?P<unit>kilos?|kg|gramos?|g|tarros?|unidades?|litros?|l|docenas?|doc)?\b",
+            normalized,
+        )
         if fraction:
             frac = ChatService._parse_fraction(fraction.group("frac"))
             if frac is not None:
                 unit = ChatService._normalize_unit_label(fraction.group("unit"))
                 return frac, unit
 
-        word_fraction = re.search(r"\b(?P<word>medio|media|cuarto)\s*(?P<unit>kilos?|kg|tarros?|unidades?|litros?|l)?\b", normalized)
+        word_fraction = re.search(
+            r"\b(?P<word>medio|media|cuarto)\s*(?P<unit>kilos?|kg|gramos?|g|tarros?|unidades?|litros?|l|docenas?|doc)?\b",
+            normalized,
+        )
         if word_fraction:
             value = {"medio": 0.5, "media": 0.5, "cuarto": 0.25}[word_fraction.group("word")]
             unit = ChatService._normalize_unit_label(word_fraction.group("unit"))
             return value, unit
 
-        numeric = re.search(r"\b(?P<qty>\d+(?:[.,]\d+)?)\s*(?P<unit>kilos?|kg|tarros?|unidades?|litros?|l)\b", normalized)
+        numeric = re.search(
+            r"\b(?P<qty>\d+(?:[.,]\d+)?)\s*(?P<unit>kilos?|kg|gramos?|g|tarros?|unidades?|litros?|l|docenas?|doc)\b",
+            normalized,
+        )
         if numeric:
             qty = float(numeric.group("qty").replace(",", "."))
             unit = ChatService._normalize_unit_label(numeric.group("unit"))
@@ -525,6 +539,31 @@ class ChatService:
         return "unidad"
 
     @staticmethod
+    def _convert_qty_between_units(qty: float, source_unit: str | None, target_unit: str | None) -> float | None:
+        if qty < 0:
+            return None
+
+        src = ChatService._normalize_unit_label(source_unit) if source_unit else None
+        tgt = ChatService._normalize_unit_label(target_unit) if target_unit else None
+
+        if not tgt:
+            return qty
+        if not src or src == tgt:
+            return qty
+
+        conversions = {
+            ("gramo", "kilo"): 1 / 1000,
+            ("kilo", "gramo"): 1000,
+            ("docena", "unidad"): 12,
+            ("unidad", "docena"): 1 / 12,
+        }
+
+        factor = conversions.get((src, tgt))
+        if factor is None:
+            return None
+        return qty * factor
+
+    @staticmethod
     def _extract_price_and_reference_qty(text_n: str) -> tuple[float | None, float | None]:
         price = ChatService._extract_unit_price(text_n)
         if price is None:
@@ -532,7 +571,7 @@ class ChatService:
 
         # Example: "me costo 3.50 el 1/2 kilo" means total 3.50 for 0.5 kilo.
         reference_match = re.search(
-            r"\b(?:me\s+cost[óo]|cost[óo]|costo)\s*(?:s\/|s\.)?\s*\d+(?:[.,]\d+)?\s*(?:el|por)\s+(?P<qty>\d+\s*/\s*\d+|\d+(?:[.,]\d+)?|medio|media|cuarto)\s*(?P<unit>kilos?|kg|tarros?|unidades?|litros?|l)?\b",
+            r"\b(?:me\s+cost[óo]|cost[óo]|costo)\s*(?:s\/|s\.)?\s*\d+(?:[.,]\d+)?\s*(?:el|por)\s+(?P<qty>\d+\s*/\s*\d+|\d+(?:[.,]\d+)?|medio|media|cuarto)\s*(?P<unit>kilos?|kg|gramos?|g|tarros?|unidades?|litros?|l|docenas?|doc)?\b",
             text_n,
         )
         if not reference_match:
@@ -1018,6 +1057,7 @@ class ChatService:
         qty: float
         name: str
         unit_price: float | None = None
+        input_unit: str | None = None
 
         if match:
             qty = ChatService._extract_qty(match.group("qty"), default=1.0)
@@ -1044,6 +1084,7 @@ class ChatService:
             qty_with_unit = ChatService._extract_qty_and_unit(text_n)
             if qty_with_unit:
                 qty = qty_with_unit[0]
+                input_unit = qty_with_unit[1]
             else:
                 qty_source = text_n
                 if not consume and unit_price is not None:
@@ -1062,7 +1103,7 @@ class ChatService:
             reduced = re.sub(r"\b(?:me\s+cost[óo]|cost[óo]|costo|a|por)\s*(?:s\/|s\.)?\s*\d+(?:[.,]\d+)?\b", " ", reduced)
             reduced = re.sub(r"\b\d+\s*/\s*\d+\b", " ", reduced)
             reduced = re.sub(r"\b\d+(?:[.,]\d+)?\b", " ", reduced)
-            reduced = re.sub(r"\b(?:medio|media|cuarto|kilo|kilos|kg|tarro|tarros|unidad|unidades|litro|litros|el|la|los|las)\b", " ", reduced)
+            reduced = re.sub(r"\b(?:medio|media|cuarto|kilo|kilos|kg|gramo|gramos|g|tarro|tarros|unidad|unidades|docena|docenas|litro|litros|el|la|los|las)\b", " ", reduced)
             name = ChatService._clean_candidate_name(reduced)
             if not name:
                 if consume:
@@ -1075,6 +1116,14 @@ class ChatService:
         product = ChatService._find_product_flexible(db, name)
         if not product:
             inferred_unit = ChatService._infer_default_unit(name)
+            qty_for_default_unit = ChatService._convert_qty_between_units(qty, input_unit, inferred_unit)
+            if qty_for_default_unit is None:
+                return (
+                    f"No pude convertir {ChatService._fmt_num(qty)} {input_unit or ''} a la unidad de {name}. "
+                    "Prueba con otra unidad o dime la compra en su unidad habitual."
+                )
+
+            qty = qty_for_default_unit
             if consume:
                 return (
                     f"No encontré '{name}' en el inventario. "
@@ -1092,6 +1141,16 @@ class ChatService:
                     location=ChatService.DEFAULT_LOCATION,
                 ),
             )
+            # Quantity is already converted to the newly created product unit.
+            input_unit = product.unit
+
+        qty_for_product_unit = ChatService._convert_qty_between_units(qty, input_unit, product.unit)
+        if qty_for_product_unit is None:
+            return (
+                f"No pude convertir {ChatService._fmt_num(qty)} {input_unit or ''} a {product.unit} para {product.name}. "
+                "Dímelo en la misma unidad del producto o en una equivalente."
+            )
+        qty = qty_for_product_unit
 
         qty_str = ChatService._fmt_num(qty)
         unit = product.unit
@@ -1180,7 +1239,9 @@ class ChatService:
         if not match:
             return None
 
-        qty = ChatService._extract_qty(text_n, default=0.0)
+        qty_with_unit = ChatService._extract_qty_and_unit(text_n)
+        qty = qty_with_unit[0] if qty_with_unit else ChatService._extract_qty(text_n, default=0.0)
+        input_unit = qty_with_unit[1] if qty_with_unit else None
         raw_candidate = match.group("name")
         name = ChatService._clean_candidate_name(raw_candidate).title()
         if not name:
@@ -1199,6 +1260,12 @@ class ChatService:
         # ── Product EXISTS → increase stock ──────────────────────────
         if existing:
             add_qty = qty if qty > 0 else 1.0
+            converted_add_qty = ChatService._convert_qty_between_units(add_qty, input_unit, existing.unit)
+            if converted_add_qty is None:
+                return (
+                    f"No pude convertir {ChatService._fmt_num(add_qty)} {input_unit or ''} a {existing.unit} para {existing.name}."
+                )
+            add_qty = converted_add_qty
             before = existing.stock_current
             InventoryService.increase_stock(db, existing, add_qty)
             after = ChatService._fmt_num(existing.stock_current)
@@ -1213,11 +1280,15 @@ class ChatService:
         import json
         from app.models.schemas import MemoryCreate
         
+        inferred_unit = ChatService._infer_default_unit(name)
+        qty_for_new_unit = ChatService._convert_qty_between_units(qty, input_unit, inferred_unit)
+        if qty_for_new_unit is None:
+            qty_for_new_unit = qty
+
         _PENDING["action"] = "create_product"
         _PENDING["name"] = name
-        _PENDING["qty"] = qty
-        qty_with_unit = ChatService._extract_qty_and_unit(text_n)
-        _PENDING["unit"] = (qty_with_unit[1] if qty_with_unit else None) or ChatService._infer_default_unit(name)
+        _PENDING["qty"] = qty_for_new_unit
+        _PENDING["unit"] = inferred_unit
 
         # Save pending state to DB for persistence across requests
         try:
@@ -1232,7 +1303,7 @@ class ChatService:
         except Exception as e:
             print(f"Warning: Could not save pending state to DB: {e}")
 
-        qty_hint = f" con {ChatService._fmt_num(qty)} unidades de entrada" if qty > 0 else ""
+        qty_hint = f" con {ChatService._fmt_num(qty_for_new_unit)} {inferred_unit} de entrada" if qty_for_new_unit > 0 else ""
         return (
             f"No tengo {name} en el inventario. "
             f"¿Quieres que lo cree{qty_hint}? Dime sí o no."

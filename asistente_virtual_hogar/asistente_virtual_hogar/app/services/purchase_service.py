@@ -41,6 +41,30 @@ class PurchaseService:
         )
 
     @staticmethod
+    def get_latest_purchase_for_product(db: Session, product: Product) -> Purchase | None:
+        return (
+            db.query(Purchase)
+            .filter(Purchase.product_id == product.id)
+            .order_by(Purchase.purchased_at.desc(), Purchase.id.desc())
+            .first()
+        )
+
+    @staticmethod
+    def get_most_expensive_product_by_latest_price(db: Session) -> tuple[Product, float] | None:
+        products = db.query(Product).order_by(Product.name.asc()).all()
+        most_expensive: tuple[Product, float] | None = None
+
+        for product in products:
+            latest = PurchaseService.get_latest_purchase_for_product(db, product)
+            if not latest or latest.unit_price is None:
+                continue
+
+            if not most_expensive or latest.unit_price > most_expensive[1]:
+                most_expensive = (product, latest.unit_price)
+
+        return most_expensive
+
+    @staticmethod
     def register_purchase(db: Session, product: Product, payload: PurchaseCreate) -> Purchase:
         purchase = Purchase(
             product_id=product.id,

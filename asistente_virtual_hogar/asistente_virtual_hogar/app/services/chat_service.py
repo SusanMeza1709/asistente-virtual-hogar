@@ -150,6 +150,24 @@ class ChatService:
         {"name": "Batido de papaya", "ingredients": ("papaya", "leche")},
     )
 
+    DEFAULT_UNIT_BY_KEYWORD = {
+        "huevo": "unidad",
+        "huevos": "unidad",
+        "leche": "tarro",
+        "arroz": "kilo",
+        "fresa": "kilo",
+        "fresas": "kilo",
+        "papaya": "kilo",
+        "platano": "kilo",
+        "banana": "kilo",
+        "manzana": "kilo",
+        "naranja": "kilo",
+        "pera": "kilo",
+        "uva": "kilo",
+        "limon": "kilo",
+        "limón": "kilo",
+    }
+
     NATURAL_INTROS = (
         "Perfecto,",
         "Buenísimo,",
@@ -280,7 +298,7 @@ class ChatService:
         text = text.strip().lower()
         text = unicodedata.normalize("NFD", text)
         text = "".join(char for char in text if unicodedata.category(char) != "Mn")
-        text = re.sub(r"[^\w\s.,:-]", " ", text)
+        text = re.sub(r"[^\w\s.,:/-]", " ", text)
         text = re.sub(r"\s+", " ", text).strip()
         return text
 
@@ -415,10 +433,123 @@ class ChatService:
 
     @staticmethod
     def _extract_qty(text: str, default: float = 1.0) -> float:
+        qty_with_unit = ChatService._extract_qty_and_unit(text)
+        if qty_with_unit:
+            return qty_with_unit[0]
+
+        for word, value in (("medio", 0.5), ("media", 0.5), ("cuarto", 0.25)):
+            if re.search(rf"\b{word}\b", text):
+                return value
+
+        match = re.search(r"\b(\d+\s*/\s*\d+)\b", text)
+        if match:
+            frac = ChatService._parse_fraction(match.group(1))
+            if frac is not None:
+                return frac
+
         match = re.search(r"(\d+(?:[.,]\d+)?)", text)
         if not match:
             return default
         return float(match.group(1).replace(",", "."))
+
+    @staticmethod
+    def _parse_fraction(raw: str) -> float | None:
+        token = raw.replace(" ", "")
+        if "/" not in token:
+            return None
+        try:
+            numerator, denominator = token.split("/", 1)
+            num = float(numerator)
+            den = float(denominator)
+            if den == 0:
+                return None
+            return num / den
+        except Exception:
+            return None
+
+    @staticmethod
+    def _normalize_unit_label(raw_unit: str | None) -> str | None:
+        if not raw_unit:
+            return None
+        value = ChatService._normalize(raw_unit)
+        if value in ("kg", "kgs", "kilo", "kilos"):
+            return "kilo"
+        if value in ("g", "gramo", "gramos"):
+            return "gramo"
+        if value in ("lt", "l", "litro", "litros"):
+            return "litro"
+        if value in ("unidad", "unidades", "u"):
+            return "unidad"
+        if value in ("tarro", "tarros"):
+            return "tarro"
+        return value
+
+    @staticmethod
+    def _extract_qty_and_unit(text: str) -> tuple[float, str | None] | None:
+        normalized = ChatService._normalize(text)
+        mixed = re.search(r"\b(?P<int>\d+)\s+(?P<frac>\d+\s*/\s*\d+)\s*(?P<unit>kilos?|kg|tarros?|unidades?|litros?|l)?\b", normalized)
+        if mixed:
+            frac = ChatService._parse_fraction(mixed.group("frac"))
+            if frac is not None:
+                whole = float(mixed.group("int"))
+                unit = ChatService._normalize_unit_label(mixed.group("unit"))
+                return whole + frac, unit
+
+        fraction = re.search(r"\b(?P<frac>\d+\s*/\s*\d+)\s*(?P<unit>kilos?|kg|tarros?|unidades?|litros?|l)?\b", normalized)
+        if fraction:
+            frac = ChatService._parse_fraction(fraction.group("frac"))
+            if frac is not None:
+                unit = ChatService._normalize_unit_label(fraction.group("unit"))
+                return frac, unit
+
+        word_fraction = re.search(r"\b(?P<word>medio|media|cuarto)\s*(?P<unit>kilos?|kg|tarros?|unidades?|litros?|l)?\b", normalized)
+        if word_fraction:
+            value = {"medio": 0.5, "media": 0.5, "cuarto": 0.25}[word_fraction.group("word")]
+            unit = ChatService._normalize_unit_label(word_fraction.group("unit"))
+            return value, unit
+
+        numeric = re.search(r"\b(?P<qty>\d+(?:[.,]\d+)?)\s*(?P<unit>kilos?|kg|tarros?|unidades?|litros?|l)\b", normalized)
+        if numeric:
+            qty = float(numeric.group("qty").replace(",", "."))
+            unit = ChatService._normalize_unit_label(numeric.group("unit"))
+            return qty, unit
+
+        return None
+
+    @staticmethod
+    def _infer_default_unit(product_name: str) -> str:
+        normalized_name = ChatService._normalize(product_name)
+        for keyword, unit in ChatService.DEFAULT_UNIT_BY_KEYWORD.items():
+            if keyword in normalized_name:
+                return unit
+        return "unidad"
+
+    @staticmethod
+    def _extract_price_and_reference_qty(text_n: str) -> tuple[float | None, float | None]:
+        price = ChatService._extract_unit_price(text_n)
+        if price is None:
+            return None, None
+
+        # Example: "me costo 3.50 el 1/2 kilo" means total 3.50 for 0.5 kilo.
+        reference_match = re.search(
+            r"\b(?:me\s+cost[óo]|cost[óo]|costo)\s*(?:s\/|s\.)?\s*\d+(?:[.,]\d+)?\s*(?:el|por)\s+(?P<qty>\d+\s*/\s*\d+|\d+(?:[.,]\d+)?|medio|media|cuarto)\s*(?P<unit>kilos?|kg|tarros?|unidades?|litros?|l)?\b",
+            text_n,
+        )
+        if not reference_match:
+            return price, None
+
+        qty_token = reference_match.group("qty")
+        qty_value: float | None = None
+        if qty_token in ("medio", "media"):
+            qty_value = 0.5
+        elif qty_token == "cuarto":
+            qty_value = 0.25
+        elif "/" in qty_token:
+            qty_value = ChatService._parse_fraction(qty_token)
+        else:
+            qty_value = float(qty_token.replace(",", "."))
+
+        return price, qty_value
 
     @staticmethod
     def _extract_unit_price(text: str) -> float | None:
@@ -886,31 +1017,80 @@ class ChatService:
         match = regex.fullmatch(text)
         qty: float
         name: str
-        unit_price = ChatService._extract_unit_price(text_n) if not consume else None
+        unit_price: float | None = None
 
         if match:
-            qty = float(match.group("qty"))
+            qty = ChatService._extract_qty(match.group("qty"), default=1.0)
             name = match.group("name").strip()
+            if not consume:
+                unit_price = ChatService._extract_unit_price(text_n)
         else:
             actions = ChatService.ACTION_CONSUME if consume else ChatService.ACTION_BUY
+            implicit_purchase = False
             if not ChatService._contains_any(text_n, actions):
-                return None
+                # Accept phrases like "la fresa me costó 3.50 el 1/2 kilo" as purchase.
+                if not consume and re.search(r"\bme\s+cost[óo]\b", text_n):
+                    implicit_purchase = True
+                else:
+                    return None
 
-            qty = ChatService._extract_qty(text_n, default=1.0)
+            if not consume:
+                price_value, reference_qty = ChatService._extract_price_and_reference_qty(text_n)
+                if price_value is not None and reference_qty and reference_qty > 0:
+                    unit_price = price_value / reference_qty
+                else:
+                    unit_price = price_value
+
+            qty_with_unit = ChatService._extract_qty_and_unit(text_n)
+            if qty_with_unit:
+                qty = qty_with_unit[0]
+            else:
+                qty_source = text_n
+                if not consume and unit_price is not None:
+                    qty_source = re.sub(
+                        r"\b(?:me\s+cost[óo]|cost[óo]|costo|a|por)\s*(?:s\/|s\.)?\s*\d+(?:[.,]\d+)?\b",
+                        " ",
+                        qty_source,
+                    )
+                qty = ChatService._extract_qty(qty_source, default=1.0)
+
             action_pattern = "|".join(actions)
-            reduced = re.sub(rf"\b(?:{action_pattern})\b", " ", text_n)
+            reduced = text_n
+            if not implicit_purchase:
+                reduced = re.sub(rf"\b(?:{action_pattern})\b", " ", reduced)
+
+            reduced = re.sub(r"\b(?:me\s+cost[óo]|cost[óo]|costo|a|por)\s*(?:s\/|s\.)?\s*\d+(?:[.,]\d+)?\b", " ", reduced)
+            reduced = re.sub(r"\b\d+\s*/\s*\d+\b", " ", reduced)
             reduced = re.sub(r"\b\d+(?:[.,]\d+)?\b", " ", reduced)
+            reduced = re.sub(r"\b(?:medio|media|cuarto|kilo|kilos|kg|tarro|tarros|unidad|unidades|litro|litros|el|la|los|las)\b", " ", reduced)
             name = ChatService._clean_candidate_name(reduced)
             if not name:
                 if consume:
                     return "Entendí que usaste algo, pero no capté qué. Dímelo así: 'gasté 1 leche'."
                 return "Entendí que compraste algo, pero no capté qué. Dímelo así: 'compré 2 leches'."
 
+        if qty <= 0:
+            qty = 0.25 if not consume else 1.0
+
         product = ChatService._find_product_flexible(db, name)
         if not product:
-            return (
-                f"No encontré '{name}' en el inventario. "
-                f"¿Quieres que lo registre? Dímelo con: 'agrega {name}'."
+            inferred_unit = ChatService._infer_default_unit(name)
+            if consume:
+                return (
+                    f"No encontré '{name}' en el inventario. "
+                    f"¿Quieres que lo registre? Dímelo con: 'agrega {name} {ChatService._fmt_num(qty)} {inferred_unit}'."
+                )
+
+            product = ProductService.create_product(
+                db,
+                ProductCreate(
+                    name=name.title(),
+                    category=ChatService.DEFAULT_CATEGORY,
+                    stock_current=0,
+                    unit=inferred_unit,
+                    stock_minimum=1,
+                    location=ChatService.DEFAULT_LOCATION,
+                ),
             )
 
         qty_str = ChatService._fmt_num(qty)
@@ -976,7 +1156,7 @@ class ChatService:
                 ProductCreate(
                     name=data["name"].strip(),
                     stock_current=float(data["stock"] or 0),
-                    unit=(data["unit"] or "unidad").strip(),
+                    unit=ChatService._normalize_unit_label(data["unit"]) or ChatService._infer_default_unit(data["name"]),
                     category=(data.get("category") or ChatService.DEFAULT_CATEGORY),
                     location=(data.get("location") or ChatService.DEFAULT_LOCATION),
                     stock_minimum=float(data["minimum"] or 1),
@@ -1036,7 +1216,8 @@ class ChatService:
         _PENDING["action"] = "create_product"
         _PENDING["name"] = name
         _PENDING["qty"] = qty
-        _PENDING["unit"] = "unidad"
+        qty_with_unit = ChatService._extract_qty_and_unit(text_n)
+        _PENDING["unit"] = (qty_with_unit[1] if qty_with_unit else None) or ChatService._infer_default_unit(name)
 
         # Save pending state to DB for persistence across requests
         try:
@@ -1056,6 +1237,54 @@ class ChatService:
             f"No tengo {name} en el inventario. "
             f"¿Quieres que lo cree{qty_hint}? Dime sí o no."
         )
+
+    @staticmethod
+    def _try_price_queries(db: Session, text_n: str) -> str | None:
+        latest_price_patterns = [
+            r"(?:ultimo|último)\s+precio\s+(?:registrado\s+)?(?:de|del|para)\s+(?P<name>.+)",
+            r"(?:a\s+como|a\s+cuanto|a\s+cuánto)\s+(?:esta|está)\s+(?P<name>.+)",
+            r"precio\s+de\s+(?P<name>.+)",
+        ]
+
+        for pattern in latest_price_patterns:
+            match = re.search(pattern, text_n)
+            if not match:
+                continue
+
+            name = ChatService._clean_candidate_name(match.group("name")).title()
+            if not name:
+                return None
+
+            product = ChatService._find_product_flexible(db, name)
+            if not product:
+                return f"No encontré '{name}' en el inventario para revisar su precio."
+
+            latest = PurchaseService.get_latest_purchase_for_product(db, product)
+            if not latest or latest.unit_price is None:
+                return f"Aún no tengo precio registrado para {product.name}."
+
+            if product.unit == "kilo":
+                half_kilo = ChatService._fmt_num(latest.unit_price * 0.5)
+                return (
+                    f"El último precio registrado de {product.name} es {ChatService._fmt_num(latest.unit_price)} por kilo "
+                    f"(equivale a {half_kilo} por 1/2 kilo)."
+                )
+
+            return (
+                f"El último precio registrado de {product.name} es {ChatService._fmt_num(latest.unit_price)} por {product.unit}."
+            )
+
+        if re.search(r"(?:producto\s+)?(?:que\s+)?cuesta\s+mas|más\s+caro|mas\s+caro", text_n):
+            result = PurchaseService.get_most_expensive_product_by_latest_price(db)
+            if not result:
+                return "Aún no tengo precios registrados para decirte qué producto cuesta más."
+            product, unit_price = result
+            return (
+                f"Por último precio registrado, el producto que cuesta más es {product.name}: "
+                f"{ChatService._fmt_num(unit_price)} por {product.unit}."
+            )
+
+        return None
 
     @staticmethod
     def _build_inventory_reply(db: Session) -> str:
@@ -1373,6 +1602,11 @@ class ChatService:
         # 16. Consume first
         if ChatService._contains_any(text_i, ChatService.CONSUME_FIRST_HINTS):
             return ChatService._build_consume_first_reply(db)
+
+        # 16.1 Price queries
+        price_query_reply = ChatService._try_price_queries(db, text_i)
+        if price_query_reply:
+            return price_query_reply
 
         # 17. Buy
         buy_reply = ChatService._try_buy_or_consume(db, text, text_i, consume=False)

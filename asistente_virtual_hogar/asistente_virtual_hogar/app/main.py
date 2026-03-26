@@ -33,6 +33,7 @@ app.include_router(memory_router)
 app.include_router(chat_router)
 
 VOICE_UI_PATH = Path(__file__).parent / "static" / "voz.html"
+PANEL_UI_PATH = Path(__file__).parent / "static" / "panel.html"
 
 
 @app.get("/")
@@ -41,6 +42,7 @@ def root():
         "message": "Asistente Virtual de Hogar activo.",
         "docs": "/docs",
         "voz": "/voz",
+        "panel": "/panel",
         "modulos": ["productos", "compras", "consumos", "alertas", "memoria", "chat"],
     }
 
@@ -48,3 +50,8 @@ def root():
 @app.get("/voz")
 def voice_ui():
     return FileResponse(VOICE_UI_PATH)
+
+
+@app.get("/panel")
+def dashboard_ui():
+    return FileResponse(PANEL_UI_PATH)

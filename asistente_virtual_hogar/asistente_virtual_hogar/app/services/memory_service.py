@@ -7,7 +7,12 @@ from app.models.schemas import MemoryCreate
 class MemoryService:
     @staticmethod
     def list_items(db: Session) -> list[MemoryItem]:
-        return db.query(MemoryItem).order_by(MemoryItem.updated_at.desc()).all()
+        return (
+            db.query(MemoryItem)
+            .filter(~MemoryItem.key.like("\\_\\_%", escape="\\"))
+            .order_by(MemoryItem.updated_at.desc())
+            .all()
+        )
 
     @staticmethod
     def get_by_key(db: Session, key: str) -> MemoryItem | None:

@@ -106,8 +106,27 @@ class AlertItem(BaseModel):
     unit: str
     reason: str
     expiration_date: Optional[date] = None
+    days_until_expiration: Optional[int] = None
+    suggested_action: Optional[str] = None
+
+
+class ShoppingListItem(BaseModel):
+    product_name: str
+    needed_quantity: float
+    unit: str
+    reason: str
+
+
+class ExpenseSummary(BaseModel):
+    total_amount: float
+    purchases_count: int
+    items_with_price: int
+    period_days: int
 
 
 class AlertsResponse(BaseModel):
     low_stock: list[AlertItem]
     expiring_soon: list[AlertItem]
+    expired: list[AlertItem]
+    consume_first: list[AlertItem]
+    shopping_list: list[ShoppingListItem]

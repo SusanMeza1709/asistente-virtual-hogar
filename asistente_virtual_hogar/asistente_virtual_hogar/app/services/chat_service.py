@@ -53,6 +53,32 @@ class ChatService:
     INVENTORY_HINTS = ("inventario", "stock", "que tengo", "qué tengo", "lista de productos", "productos tengo")
     ALERT_HINTS = ("alerta", "alertas", "por vencer", "vencimiento", "falta comprar", "bajo stock")
     MEMORY_HINTS = ("memoria", "que recuerdas", "qué recuerdas", "recuerdas de mi", "recuerdas de mí")
+    EXPIRING_HINTS = ("productos por vencer", "que esta por vencer", "qué está por vencer", "por vencer")
+    SHOPPING_LIST_HINTS = ("lista de compras", "que falta comprar", "qué falta comprar", "compras pendientes")
+    DAILY_ALERT_HINTS = ("alertas del dia", "alertas del día", "resumen del dia", "resumen del día")
+    EXPENSE_HINTS = ("gastos del hogar", "gastos de la casa", "cuanto he gastado", "cuánto he gastado", "mis gastos")
+    IMPORTANT_MEMORY_HINTS = ("recuerdos importantes", "recuerdos clave", "cosas importantes que recuerdas")
+    CONSUME_FIRST_HINTS = ("que consumir primero", "qué consumir primero", "que debo consumir primero", "qué debo consumir primero")
+    RECIPE_HINTS = ("recetas segun inventario", "recetas según inventario", "que puedo cocinar", "qué puedo cocinar", "con lo que hay en la refri")
+    DAILY_SUMMARY_HINTS = ("resumen diario", "resumen del dia", "resumen del día", "resumen diario automatico", "resumen diario automático")
+    HOUSEHOLD_REMINDER_HINTS = ("recordatorios del hogar", "recordatorio del hogar", "recordatorios hogar")
+
+    HOUSEHOLD_DEFAULT_REMINDERS = (
+        "Revisar gas",
+        "Revisar agua",
+        "Revisar luz",
+        "Programar limpieza",
+        "Sacar basura",
+        "Revisar pagos pendientes",
+    )
+
+    RECIPE_BOOK = (
+        {"name": "Tortilla de huevo", "ingredients": ("huevo",)},
+        {"name": "Avena con leche", "ingredients": ("avena", "leche")},
+        {"name": "Yogurt con fruta", "ingredients": ("yogurt", "papaya", "platano", "banana", "fresa")},
+        {"name": "Arroz con huevo", "ingredients": ("arroz", "huevo")},
+        {"name": "Batido de papaya", "ingredients": ("papaya", "leche")},
+    )
     # Confirmation / denial
     CONFIRM_HINTS = (
         "si", "sí", "claro", "dale", "ok", "afirmativo", "por supuesto",
@@ -110,6 +136,17 @@ class ChatService:
         if float(value).is_integer():
             return str(int(value))
         return f"{value:.2f}".rstrip("0").rstrip(".")
+
+    @staticmethod
+    def _format_days(days: int | None) -> str:
+        if days is None:
+            return "sin fecha registrada"
+        if days < 0:
+            overdue = abs(days)
+            return f"vencido hace {overdue} día{'s' if overdue != 1 else ''}"
+        if days == 0:
+            return "vence hoy"
+        return f"vence en {days} día{'s' if days != 1 else ''}"
 
     @staticmethod
     def _clean_candidate_name(candidate: str) -> str:
@@ -632,6 +669,217 @@ class ChatService:
         )
 
     @staticmethod
+    def _build_inventory_reply(db: Session) -> str:
+        AlertService.refresh_product_statuses(db)
+        products = ProductService.list_products(db)
+        if not products:
+            return "Tu inventario está vacío todavía."
+
+        lines = []
+        for product in products:
+            status_hint = ""
+            if product.status == "vencido":
+                status_hint = " [VENCIDO]"
+            elif product.expiration_date:
+                days_until_expiration = (product.expiration_date - datetime.utcnow().date()).days
+                if days_until_expiration <= 3:
+                    status_hint = f" [{ChatService._format_days(days_until_expiration)}]"
+
+            lines.append(
+                f"- {product.name}: {ChatService._fmt_num(product.stock_current)} {product.unit} ({product.location or 'sin ubicación'}){status_hint}"
+            )
+        return "Esto es lo que tienes en casa:\n" + "\n".join(lines)
+
+    @staticmethod
+    def _build_expiring_reply(db: Session) -> str:
+        alerts = AlertService.build_alerts(db)
+        if not alerts.expired and not alerts.expiring_soon:
+            return "No tienes productos vencidos ni próximos a vencer por ahora."
+
+        chunks: list[str] = []
+        if alerts.expired:
+            chunks.append(
+                "Vencidos:\n" + "\n".join(
+                    f"- {item.product_name}: {ChatService._format_days(item.days_until_expiration)}"
+                    for item in alerts.expired
+                )
+            )
+        if alerts.expiring_soon:
+            chunks.append(
+                "Por vencer:\n" + "\n".join(
+                    f"- {item.product_name}: {ChatService._format_days(item.days_until_expiration)}"
+                    for item in alerts.expiring_soon
+                )
+            )
+        return "\n\n".join(chunks)
+
+    @staticmethod
+    def _build_shopping_list_reply(db: Session) -> str:
+        alerts = AlertService.build_alerts(db)
+        if not alerts.shopping_list:
+            return "Tu lista de compras está vacía por ahora."
+
+        lines = [
+            f"- {item.product_name}: compra al menos {ChatService._fmt_num(item.needed_quantity)} {item.unit}"
+            for item in alerts.shopping_list
+        ]
+        return "Lista de compras:\n" + "\n".join(lines)
+
+    @staticmethod
+    def _build_daily_alerts_reply(db: Session) -> str:
+        alerts = AlertService.build_alerts(db)
+        chunks: list[str] = []
+
+        if alerts.expired:
+            chunks.append(f"- {len(alerts.expired)} producto(s) vencido(s)")
+        if alerts.expiring_soon:
+            chunks.append(f"- {len(alerts.expiring_soon)} producto(s) por vencer")
+        if alerts.low_stock:
+            chunks.append(f"- {len(alerts.low_stock)} producto(s) con stock bajo")
+        if alerts.consume_first:
+            next_item = alerts.consume_first[0]
+            chunks.append(
+                f"- Consume primero {next_item.product_name}: {ChatService._format_days(next_item.days_until_expiration)}"
+            )
+
+        if not chunks:
+            return "Alertas del día: todo está en orden hoy."
+        return "Alertas del día:\n" + "\n".join(chunks)
+
+    @staticmethod
+    def _build_expense_reply(db: Session) -> str:
+        summary = PurchaseService.summarize_expenses(db, days=30)
+        if summary.purchases_count == 0:
+            return "Aún no tengo compras registradas para calcular gastos del hogar."
+        if summary.items_with_price == 0:
+            return (
+                f"Tienes {summary.purchases_count} compra(s) registradas en los últimos {summary.period_days} días, "
+                "pero ninguna con precio. Si registras unit_price podré calcular el gasto total."
+            )
+        return (
+            f"Gastos del hogar en los últimos {summary.period_days} días: {ChatService._fmt_num(summary.total_amount)}. "
+            f"Tomé {summary.items_with_price} compra(s) con precio de un total de {summary.purchases_count}."
+        )
+
+    @staticmethod
+    def _build_important_memories_reply(db: Session) -> str:
+        items = MemoryService.list_items(db)
+        if not items:
+            return "Aún no tengo recuerdos guardados sobre tus preferencias."
+        top_items = items[:5]
+        return "Recuerdos importantes:\n" + "\n".join(f"- {item.key}: {item.value}" for item in top_items)
+
+    @staticmethod
+    def _build_consume_first_reply(db: Session) -> str:
+        alerts = AlertService.build_alerts(db)
+        if not alerts.consume_first:
+            return "No veo productos con vencimiento cercano para priorizar consumo."
+        lines = [
+            f"- {item.product_name}: {ChatService._format_days(item.days_until_expiration)}"
+            for item in alerts.consume_first
+        ]
+        return "Te sugiero consumir primero:\n" + "\n".join(lines)
+
+    @staticmethod
+    def _build_recipes_reply(db: Session) -> str:
+        products = ProductService.list_products(db)
+        available_names = [ChatService._normalize(product.name) for product in products if product.stock_current > 0]
+        if not available_names:
+            return "Tu inventario está vacío. Cuando agregues productos, te sugiero recetas con lo que tengas."
+
+        suggestions: list[str] = []
+        for recipe in ChatService.RECIPE_BOOK:
+            matched = []
+            for ingredient in recipe["ingredients"]:
+                if any(ingredient in product_name for product_name in available_names):
+                    matched.append(ingredient)
+
+            ingredients_count = len(recipe["ingredients"])
+            min_required = 1 if ingredients_count == 1 else 2
+            if len(set(matched)) >= min_required:
+                suggestions.append(recipe["name"])
+
+        if not suggestions:
+            return (
+                "Con lo que hay en la refri aún no detecto una receta clara de mi lista. "
+                "Si agregas más ingredientes, te sugiero opciones concretas."
+            )
+
+        lines = [f"- {name}" for name in suggestions[:5]]
+        return "Con lo que hay en la refri puedes cocinar:\n" + "\n".join(lines)
+
+    @staticmethod
+    def _list_household_reminders(db: Session) -> list[str]:
+        items = MemoryService.list_items(db)
+        custom = [item.value for item in items if item.key.startswith("hogar:")]
+        reminders = list(ChatService.HOUSEHOLD_DEFAULT_REMINDERS)
+        reminders.extend(custom)
+        # Keep order but remove duplicates.
+        seen = set()
+        unique = []
+        for reminder in reminders:
+            marker = ChatService._normalize(reminder)
+            if marker in seen:
+                continue
+            seen.add(marker)
+            unique.append(reminder)
+        return unique
+
+    @staticmethod
+    def _build_household_reminders_reply(db: Session) -> str:
+        reminders = ChatService._list_household_reminders(db)
+        return "Recordatorios del hogar:\n" + "\n".join(f"- {item}" for item in reminders)
+
+    @staticmethod
+    def _try_save_household_reminder(db: Session, text: str, text_n: str) -> str | None:
+        patterns = [
+            r"(?:agrega|agregar|anota|guardar|guarda|crea|crear)\s+(?:un\s+)?recordatorio\s+(?:del\s+)?hogar\s+(?P<note>.+)",
+            r"(?:recu[eé]rdame|recordatorio)\s+(?:que\s+)?(?P<note>.+)",
+        ]
+
+        match = None
+        for pattern in patterns:
+            match = re.search(pattern, text_n)
+            if match:
+                break
+        if not match:
+            return None
+
+        note = match.group("note").strip(" .")
+        if len(note) < 3:
+            return None
+
+        normalized_note = re.sub(r"\s+", " ", note).strip()
+        key_suffix = re.sub(r"[^a-z0-9\s-]", "", ChatService._normalize(normalized_note)).strip()
+        key_suffix = re.sub(r"\s+", "-", key_suffix)[:80] or "general"
+        key = f"hogar:{key_suffix}"
+
+        MemoryService.save_item(db, MemoryCreate(key=key, value=normalized_note))
+        return f"Listo. Guardé el recordatorio del hogar: {normalized_note}."
+
+    @staticmethod
+    def _build_daily_summary_reply(db: Session) -> str:
+        alerts = AlertService.build_alerts(db)
+        shopping = alerts.shopping_list
+        reminders = ChatService._list_household_reminders(db)
+
+        expired_count = len(alerts.expired)
+        expiring_count = len(alerts.expiring_soon)
+
+        missing = "nada"
+        if shopping:
+            missing = ", ".join(item.product_name for item in shopping[:2])
+
+        tomorrow_buy = shopping[0].product_name if shopping else "sin compras urgentes"
+        reminder_hint = reminders[0] if reminders else "sin recordatorios pendientes"
+
+        return (
+            f"Resumen diario: Hoy vencen {expired_count} producto(s), hay {expiring_count} por vencer, "
+            f"faltan {missing} y mañana toca comprar {tomorrow_buy}. "
+            f"Recordatorio clave: {reminder_hint}."
+        )
+
+    @staticmethod
     def reply(db: Session, message: str) -> str:
         text = message.strip()
         text_n = ChatService._normalize(text)
@@ -651,51 +899,92 @@ class ChatService:
         if memory_reply:
             return memory_reply
 
-        # 4. Memory delete
+        # 4. Household reminder save
+        household_save_reply = ChatService._try_save_household_reminder(db, text, text_n)
+        if household_save_reply:
+            return household_save_reply
+
+        # 5. Memory delete
         delete_memory_reply = ChatService._try_delete_memory(db, text_n)
         if delete_memory_reply:
             return delete_memory_reply
 
-        # 5. Update location
+        # 6. Update location
         location_reply = ChatService._try_update_location(db, text_n)
         if location_reply:
             return location_reply
 
-        # 6. Delete from inventory
+        # 7. Delete from inventory
         delete_product_reply = ChatService._try_delete_product(db, text_n)
         if delete_product_reply:
             return delete_product_reply
 
-        # 7. Add to / create in inventory
+        # 8. Add to / create in inventory
         add_reply = ChatService._try_add_or_create(db, text, text_n)
         if add_reply:
             return add_reply
 
-        # 8. Buy
+        # 9. Daily summary
+        if ChatService._contains_any(text_n, ChatService.DAILY_SUMMARY_HINTS):
+            return ChatService._build_daily_summary_reply(db)
+
+        # 10. Recipes
+        if ChatService._contains_any(text_n, ChatService.RECIPE_HINTS):
+            return ChatService._build_recipes_reply(db)
+
+        # 11. Household reminders list
+        if ChatService._contains_any(text_n, ChatService.HOUSEHOLD_REMINDER_HINTS):
+            return ChatService._build_household_reminders_reply(db)
+
+        # 12. Shopping list
+        if ChatService._contains_any(text_n, ChatService.SHOPPING_LIST_HINTS):
+            return ChatService._build_shopping_list_reply(db)
+
+        # 13. Daily alerts
+        if ChatService._contains_any(text_n, ChatService.DAILY_ALERT_HINTS):
+            return ChatService._build_daily_alerts_reply(db)
+
+        # 14. Expenses
+        if ChatService._contains_any(text_n, ChatService.EXPENSE_HINTS):
+            return ChatService._build_expense_reply(db)
+
+        # 15. Important memories
+        if ChatService._contains_any(text_n, ChatService.IMPORTANT_MEMORY_HINTS):
+            return ChatService._build_important_memories_reply(db)
+
+        # 16. Consume first
+        if ChatService._contains_any(text_n, ChatService.CONSUME_FIRST_HINTS):
+            return ChatService._build_consume_first_reply(db)
+
+        # 17. Buy
         buy_reply = ChatService._try_buy_or_consume(db, text, text_n, consume=False)
         if buy_reply:
             return buy_reply
 
-        # 9. Consume
+        # 18. Consume
         consume_reply = ChatService._try_buy_or_consume(db, text, text_n, consume=True)
         if consume_reply:
             return consume_reply
 
-        # 10. Inventory list
+        # 19. Inventory list
         if ChatService._contains_any(text_n, ChatService.INVENTORY_HINTS):
-            products = ProductService.list_products(db)
-            if not products:
-                return "Tu inventario está vacío todavía."
-            lines = [
-                f"- {p.name}: {ChatService._fmt_num(p.stock_current)} {p.unit} ({p.location or 'sin ubicación'})"
-                for p in products
-            ]
-            return "Esto es lo que tienes en casa:\n" + "\n".join(lines)
+            return ChatService._build_inventory_reply(db)
 
-        # 11. Alerts
+        # 20. Products expiring / expired
+        if ChatService._contains_any(text_n, ChatService.EXPIRING_HINTS):
+            return ChatService._build_expiring_reply(db)
+
+        # 17. Alerts
         if ChatService._contains_any(text_n, ChatService.ALERT_HINTS):
             alerts = AlertService.build_alerts(db)
             chunks: list = []
+            if alerts.expired:
+                chunks.append(
+                    "Vencidos:\n" + "\n".join(
+                        f"- {item.product_name}: {ChatService._format_days(item.days_until_expiration)}"
+                        for item in alerts.expired
+                    )
+                )
             if alerts.low_stock:
                 chunks.append(
                     "Stock bajo:\n" + "\n".join(
@@ -707,13 +996,20 @@ class ChatService:
             if alerts.expiring_soon:
                 chunks.append(
                     "Próximos a vencer:\n" + "\n".join(
-                        f"- {item.product_name}: vence el {item.expiration_date}"
+                        f"- {item.product_name}: {ChatService._format_days(item.days_until_expiration)}"
                         for item in alerts.expiring_soon
+                    )
+                )
+            if alerts.consume_first:
+                chunks.append(
+                    "Consume primero:\n" + "\n".join(
+                        f"- {item.product_name}: {ChatService._format_days(item.days_until_expiration)}"
+                        for item in alerts.consume_first
                     )
                 )
             return "\n\n".join(chunks) if chunks else "Todo está bien: sin stock bajo ni productos por vencer pronto."
 
-        # 12. Memory recall
+        # 18. Memory recall
         if ChatService._contains_any(text_n, ChatService.MEMORY_HINTS):
             items = MemoryService.list_items(db)
             if not items:
@@ -723,6 +1019,6 @@ class ChatService:
         return (
             "No entendí eso del todo, pero puedo ayudarte. Por ejemplo: "
             "'compré 2 leches', 'gasté 1 yogurt', 'agrega 3 huevos', "
-            "'qué tengo en casa', 'ver alertas' o "
+            "'qué tengo en casa', 'productos por vencer', 'lista de compras', 'gastos del hogar' o "
             "'recuerda que mi bebida favorita es café'."
         )

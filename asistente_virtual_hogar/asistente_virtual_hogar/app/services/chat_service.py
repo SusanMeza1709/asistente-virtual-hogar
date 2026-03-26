@@ -283,7 +283,7 @@ class ChatService:
                         f"¡Listo! Creé {created.name} en el inventario. "
                         f"Cuando lo compres, avísame y sumo el stock."
                     )
-                except Exception:
+                except Exception as exc:
                     try:
                         db.rollback()
                     except Exception:
@@ -291,7 +291,8 @@ class ChatService:
                     _clear_pending_state()
                     return (
                         "Se me complicó confirmar ese producto en este momento. "
-                        "Inténtalo otra vez con: 'agrega nombre_del_producto'."
+                        f"Inténtalo otra vez con: 'agrega nombre_del_producto'. "
+                        f"(debug: {exc.__class__.__name__})"
                     )
 
             return "Acción confirmada, pero no encontré qué hacer. Cuéntame de nuevo."

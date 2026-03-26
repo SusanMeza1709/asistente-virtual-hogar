@@ -21,6 +21,9 @@ _PENDING: dict = {}
 
 
 class ChatService:
+    DEFAULT_CATEGORY = "General"
+    DEFAULT_LOCATION = "Sin ubicación"
+
     ACTION_ADD = (
         "agregar",
         "agrega",
@@ -245,9 +248,11 @@ class ChatService:
                             db,
                             ProductCreate(
                                 name=name,
+                                category=ChatService.DEFAULT_CATEGORY,
                                 stock_current=qty,
                                 unit=unit,
                                 stock_minimum=1,
+                                location=ChatService.DEFAULT_LOCATION,
                             ),
                         )
                     except IntegrityError:
@@ -283,7 +288,7 @@ class ChatService:
                         f"¡Listo! Creé {created.name} en el inventario. "
                         f"Cuando lo compres, avísame y sumo el stock."
                     )
-                except Exception as exc:
+                except Exception:
                     try:
                         db.rollback()
                     except Exception:
@@ -291,8 +296,7 @@ class ChatService:
                     _clear_pending_state()
                     return (
                         "Se me complicó confirmar ese producto en este momento. "
-                        f"Inténtalo otra vez con: 'agrega nombre_del_producto'. "
-                        f"(debug: {exc.__class__.__name__})"
+                        "Inténtalo otra vez con: 'agrega nombre_del_producto'."
                     )
 
             return "Acción confirmada, pero no encontré qué hacer. Cuéntame de nuevo."
@@ -454,8 +458,8 @@ class ChatService:
                     name=data["name"].strip(),
                     stock_current=float(data["stock"] or 0),
                     unit=(data["unit"] or "unidad").strip(),
-                    category=(data.get("category") or None),
-                    location=(data.get("location") or None),
+                    category=(data.get("category") or ChatService.DEFAULT_CATEGORY),
+                    location=(data.get("location") or ChatService.DEFAULT_LOCATION),
                     stock_minimum=float(data["minimum"] or 1),
                     expiration_date=expiration,
                 ),

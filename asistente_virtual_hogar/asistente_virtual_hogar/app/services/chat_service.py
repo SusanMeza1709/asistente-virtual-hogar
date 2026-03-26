@@ -167,6 +167,7 @@ class ChatService:
     @staticmethod
     def _try_pending_confirmation(db: Session, text_n: str) -> str | None:
         """Execute or cancel a previously stored pending action."""
+        global _PENDING
         import json
         from app.models.entities import MemoryItem
         
@@ -198,7 +199,6 @@ class ChatService:
                 except:
                     pass
                 
-                global _PENDING
                 _PENDING.clear()
                 
                 # Crea el producto
@@ -234,7 +234,6 @@ class ChatService:
             except:
                 pass
             
-            global _PENDING
             _PENDING.clear()
             
             return f"Entendido, no creé {pending_name}. Avísame si cambias de idea."

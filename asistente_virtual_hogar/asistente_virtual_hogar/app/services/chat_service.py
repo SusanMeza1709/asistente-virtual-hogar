@@ -6,7 +6,7 @@ from difflib import get_close_matches
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.models.schemas import ConsumptionCreate, MemoryCreate, ProductCreate, PurchaseCreate
+from app.models.schemas import ConsumptionCreate, MemoryCreate, ProductCreate, ProductUpdate, PurchaseCreate
 from app.services.alert_service import AlertService
 from app.services.consumption_service import ConsumptionService
 from app.services.inventory_service import InventoryService
@@ -358,6 +358,7 @@ class ChatService:
         memory_patterns = [
             r"(?:recuerda|anota|guarda)\s+que\s+(?P<key>.+?)\s+(?:es|:|=)\s+(?P<value>.+)",
             r"(?:acuerdate|acuérdate)\s+de\s+(?P<key>.+?)\s+(?:es|:|=)\s+(?P<value>.+)",
+            r"(?:agrega|agregar|anota|guarda)\s+(?:un\s+)?recuerdo\s+(?:que\s+)?(?P<key>.+?)\s+(?:es|:|=)\s+(?P<value>.+)",
         ]
         for pattern in memory_patterns:
             match = re.search(pattern, text_n)
@@ -366,6 +367,98 @@ class ChatService:
                 value = match.group("value").strip()
                 item = MemoryService.save_item(db, MemoryCreate(key=key, value=value))
                 return f"Perfecto, lo recordaré: {item.key} = {item.value}."
+        return None
+
+    @staticmethod
+    def _try_update_location(db: Session, text_n: str) -> str | None:
+        patterns = [
+            r"(?:cambia|cambiar|actualiza|actualizar|modifica|modificar)\s+(?:la\s+)?(?:ubicacion|ubicación|lugar)\s+de\s+(?P<name>.+?)\s+(?:a|en)\s+(?P<location>.+)",
+            r"(?:mueve|mover|pon)\s+(?P<name>.+?)\s+(?:a|al|en)\s+(?P<location>.+)",
+        ]
+
+        match = None
+        for pattern in patterns:
+            match = re.search(pattern, text_n)
+            if match:
+                break
+
+        if not match:
+            return None
+
+        raw_name = match.group("name")
+        raw_location = match.group("location")
+
+        name = ChatService._clean_candidate_name(raw_name).title()
+        name = re.sub(r"\s+", " ", name).strip()[:120]
+
+        location = ChatService._clean_candidate_name(raw_location).title()
+        location = re.sub(r"\s+", " ", location).strip(" ,.-")[:50]
+
+        if not name or not location:
+            return "Entendí que quieres cambiar una ubicación, pero me faltó producto o lugar. Ejemplo: 'cambia la ubicación de leche a cocina'."
+
+        product = ChatService._find_product_flexible(db, name)
+        if not product:
+            return f"No encontré '{name}' en el inventario para cambiar su ubicación."
+
+        previous = product.location or "Sin ubicación"
+        ProductService.update_product(db, product, ProductUpdate(location=location))
+        return f"Listo. Cambié la ubicación de {product.name} de {previous} a {product.location}."
+
+    @staticmethod
+    def _try_delete_memory(db: Session, text_n: str) -> str | None:
+        patterns = [
+            r"(?:olvida|elimina|eliminar|borra|borrar|quita)\s+que\s+(?P<key>.+?)\s+(?:es|:|=)\s+(?P<value>.+)",
+            r"(?:elimina|eliminar|borra|borrar|quita)\s+(?:el\s+|un\s+)?recuerdo\s+(?:de\s+)?(?P<key>.+)",
+        ]
+
+        for pattern in patterns:
+            match = re.search(pattern, text_n)
+            if not match:
+                continue
+
+            key = match.group("key").strip()
+            item = MemoryService.get_by_key(db, key)
+            if not item:
+                return f"No encontré un recuerdo guardado con '{key}'."
+
+            value = match.groupdict().get("value")
+            if value and ChatService._normalize(item.value) != ChatService._normalize(value):
+                return f"Encontré '{item.key}', pero su valor guardado no coincide con '{value.strip()}'."
+
+            deleted_key = item.key
+            MemoryService.delete_item(db, item)
+            return f"Listo. Eliminé el recuerdo '{deleted_key}'."
+
+        return None
+
+    @staticmethod
+    def _try_delete_product(db: Session, text_n: str) -> str | None:
+        patterns = [
+            r"(?:elimina|eliminar|borra|borrar|quita|quitar|saca|sacar)\s+(?:del\s+|de\s+mi\s+)?(?:inventario\s+)?(?:el\s+|la\s+|producto\s+)?(?P<name>.+)",
+            r"(?:ya\s+no\s+quiero|ya\s+no\s+deseo)\s+(?:tener\s+)?(?P<name>.+?)\s+(?:en\s+el\s+inventario|en\s+casa)",
+        ]
+
+        for pattern in patterns:
+            match = re.search(pattern, text_n)
+            if not match:
+                continue
+
+            raw_name = match.group("name")
+            raw_name = re.sub(r"\b(?:del|de mi|en el)\s+(?:inventario|casa)\b", "", raw_name).strip()
+            name = ChatService._clean_candidate_name(raw_name).title()
+            name = re.sub(r"\s+", " ", name).strip()[:120]
+            if not name:
+                return "Entendí que quieres eliminar un producto, pero no capté cuál."
+
+            product = ChatService._find_product_flexible(db, name)
+            if not product:
+                return f"No encontré '{name}' en el inventario para eliminarlo."
+
+            deleted_name = product.name
+            ProductService.delete_product(db, product)
+            return f"Listo. Eliminé {deleted_name} del inventario."
+
         return None
 
     @staticmethod
@@ -553,27 +646,42 @@ class ChatService:
         if social_reply:
             return social_reply
 
-        # 3. Add to / create in inventory
-        add_reply = ChatService._try_add_or_create(db, text, text_n)
-        if add_reply:
-            return add_reply
-
-        # 4. Buy
-        buy_reply = ChatService._try_buy_or_consume(db, text, text_n, consume=False)
-        if buy_reply:
-            return buy_reply
-
-        # 5. Consume
-        consume_reply = ChatService._try_buy_or_consume(db, text, text_n, consume=True)
-        if consume_reply:
-            return consume_reply
-
-        # 6. Memory save
+        # 3. Memory save
         memory_reply = ChatService._try_memory_natural(db, text, text_n)
         if memory_reply:
             return memory_reply
 
-        # 7. Inventory list
+        # 4. Memory delete
+        delete_memory_reply = ChatService._try_delete_memory(db, text_n)
+        if delete_memory_reply:
+            return delete_memory_reply
+
+        # 5. Update location
+        location_reply = ChatService._try_update_location(db, text_n)
+        if location_reply:
+            return location_reply
+
+        # 6. Delete from inventory
+        delete_product_reply = ChatService._try_delete_product(db, text_n)
+        if delete_product_reply:
+            return delete_product_reply
+
+        # 7. Add to / create in inventory
+        add_reply = ChatService._try_add_or_create(db, text, text_n)
+        if add_reply:
+            return add_reply
+
+        # 8. Buy
+        buy_reply = ChatService._try_buy_or_consume(db, text, text_n, consume=False)
+        if buy_reply:
+            return buy_reply
+
+        # 9. Consume
+        consume_reply = ChatService._try_buy_or_consume(db, text, text_n, consume=True)
+        if consume_reply:
+            return consume_reply
+
+        # 10. Inventory list
         if ChatService._contains_any(text_n, ChatService.INVENTORY_HINTS):
             products = ProductService.list_products(db)
             if not products:
@@ -584,7 +692,7 @@ class ChatService:
             ]
             return "Esto es lo que tienes en casa:\n" + "\n".join(lines)
 
-        # 8. Alerts
+        # 11. Alerts
         if ChatService._contains_any(text_n, ChatService.ALERT_HINTS):
             alerts = AlertService.build_alerts(db)
             chunks: list = []
@@ -605,7 +713,7 @@ class ChatService:
                 )
             return "\n\n".join(chunks) if chunks else "Todo está bien: sin stock bajo ni productos por vencer pronto."
 
-        # 9. Memory recall
+        # 12. Memory recall
         if ChatService._contains_any(text_n, ChatService.MEMORY_HINTS):
             items = MemoryService.list_items(db)
             if not items:

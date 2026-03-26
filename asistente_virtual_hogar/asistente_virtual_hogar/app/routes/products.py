@@ -35,3 +35,13 @@ def update_product(product_id: int, payload: ProductUpdate, db: Session = Depend
     if not product:
         raise HTTPException(status_code=404, detail="Producto no encontrado.")
     return ProductService.update_product(db, product, payload)
+
+
+@router.delete("/{product_id}")
+def delete_product(product_id: int, db: Session = Depends(get_db)):
+    product = ProductService.get_by_id(db, product_id)
+    if not product:
+        raise HTTPException(status_code=404, detail="Producto no encontrado.")
+    name = product.name
+    ProductService.delete_product(db, product)
+    return {"message": f"Producto '{name}' eliminado del inventario."}

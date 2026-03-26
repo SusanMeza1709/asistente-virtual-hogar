@@ -10,6 +10,15 @@ class MemoryService:
         return db.query(MemoryItem).order_by(MemoryItem.updated_at.desc()).all()
 
     @staticmethod
+    def get_by_key(db: Session, key: str) -> MemoryItem | None:
+        return db.query(MemoryItem).filter(MemoryItem.key.ilike(key.strip())).first()
+
+    @staticmethod
+    def delete_item(db: Session, item: MemoryItem) -> None:
+        db.delete(item)
+        db.commit()
+
+    @staticmethod
     def save_item(db: Session, payload: MemoryCreate) -> MemoryItem:
         item = db.query(MemoryItem).filter(MemoryItem.key.ilike(payload.key.strip())).first()
         if item:

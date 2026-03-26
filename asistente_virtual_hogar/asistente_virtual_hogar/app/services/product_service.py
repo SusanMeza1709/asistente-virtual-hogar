@@ -38,3 +38,8 @@ class ProductService:
         db.commit()
         db.refresh(product)
         return product
+
+    @staticmethod
+    def delete_product(db: Session, product: Product) -> None:
+        db.delete(product)
+        db.commit()

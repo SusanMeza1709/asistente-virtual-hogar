@@ -3567,6 +3567,8 @@ class ChatService:
 
         def _breakfast_block_label(recipe_name: str) -> str:
             name_n = ChatService._normalize(recipe_name)
+            if "combo desayuno" in name_n:
+                return "Combos"
             if any(token in name_n for token in ("jugo", "batido", "licuado", "bebida", "limonada", "infusion", "infusion")):
                 return "Bebidas"
             if any(token in name_n for token in ("pan", "tostada", "sanguche", "sandwich", "sanduche")):
@@ -3574,6 +3576,103 @@ class ChatService:
             if any(token in name_n for token in ("fruta", "ensalada de frutas", "yogurt")):
                 return "Frutas"
             return "Otras opciones"
+
+        def _merge_unique_items(values: list[str]) -> list[str]:
+            merged: list[str] = []
+            seen = set()
+            for raw in values:
+                key = ChatService._normalize(str(raw))
+                if not key or key in seen:
+                    continue
+                seen.add(key)
+                merged.append(str(raw))
+            return merged
+
+        def _build_breakfast_combo_options(pool: list[dict], max_options: int = 4) -> list[dict]:
+            beverages = [item for item in pool if _breakfast_block_label(str(item.get("name", ""))) == "Bebidas"]
+            companions = [
+                item for item in pool
+                if _breakfast_block_label(str(item.get("name", ""))) in ("Panes/Sanguches", "Frutas", "Otras opciones")
+            ]
+
+            if not beverages or not companions:
+                return []
+
+            def _companion_priority(item: dict) -> int:
+                label = _breakfast_block_label(str(item.get("name", "")))
+                if label == "Panes/Sanguches":
+                    return 0
+                if label == "Frutas":
+                    return 1
+                return 2
+
+            companions = sorted(companions, key=_companion_priority)
+            combos: list[dict] = []
+            used_pairs = set()
+
+            for index, companion in enumerate(companions):
+                if len(combos) >= max_options:
+                    break
+
+                beverage = beverages[index % len(beverages)]
+                pair_key = (
+                    ChatService._normalize(str(beverage.get("name", ""))),
+                    ChatService._normalize(str(companion.get("name", ""))),
+                )
+                if pair_key in used_pairs:
+                    continue
+                used_pairs.add(pair_key)
+
+                b_name = str(beverage.get("name", "Bebida"))
+                c_name = str(companion.get("name", "Acompanamiento"))
+                b_steps = list(beverage.get("steps") or [])[:4]
+                c_steps = list(companion.get("steps") or [])[:4]
+
+                combo_steps = [f"Bebida - {b_name}: {step}" for step in b_steps] + [
+                    f"Acompanamiento - {c_name}: {step}" for step in c_steps
+                ]
+
+                b_matched = list(beverage.get("matched") or [])
+                c_matched = list(companion.get("matched") or [])
+                b_missing = list(beverage.get("missing") or [])
+                c_missing = list(companion.get("missing") or [])
+                b_missing_fridge = list(beverage.get("missing_in_fridge") or [])
+                c_missing_fridge = list(companion.get("missing_in_fridge") or [])
+                b_cond_ok = list(beverage.get("condiments_available") or [])
+                c_cond_ok = list(companion.get("condiments_available") or [])
+                b_cond_miss = list(beverage.get("condiments_missing") or [])
+                c_cond_miss = list(companion.get("condiments_missing") or [])
+
+                b_cost = beverage.get("cost_estimate")
+                c_cost = companion.get("cost_estimate")
+                combo_cost = None
+                if b_cost is not None or c_cost is not None:
+                    combo_cost = round(float(b_cost or 0) + float(c_cost or 0), 2)
+
+                b_prep = int(beverage.get("prep_minutes") or 0)
+                c_prep = int(companion.get("prep_minutes") or 0)
+                combo_prep = max(8, b_prep + c_prep)
+
+                combos.append(
+                    {
+                        "name": f"Combo desayuno: {b_name} + {c_name}",
+                        "meal": "desayuno",
+                        "is_complete": bool(beverage.get("is_complete", False)) and bool(companion.get("is_complete", False)),
+                        "score": int(beverage.get("score", 0)) + int(companion.get("score", 0)) + 20,
+                        "matched": _merge_unique_items(b_matched + c_matched),
+                        "missing": _merge_unique_items(b_missing + c_missing),
+                        "missing_in_fridge": _merge_unique_items(b_missing_fridge + c_missing_fridge),
+                        "steps": combo_steps,
+                        "beverage_hint": b_name,
+                        "prep_minutes": combo_prep,
+                        "cost_estimate": combo_cost,
+                        "condiments_available": _merge_unique_items(b_cond_ok + c_cond_ok),
+                        "condiments_missing": _merge_unique_items(b_cond_miss + c_cond_miss),
+                        "source": str(beverage.get("source") or companion.get("source") or "combo"),
+                    }
+                )
+
+            return combos[:max_options]
 
         def _select_breakfast_varied_options(pool: list[dict], max_options: int = 4) -> list[dict]:
             """Pick breakfast options with block diversity using ranked pool order.
@@ -4265,7 +4364,10 @@ class ChatService:
             ]
 
         if gemini_options:
-            options = _select_breakfast_varied_options(gemini_options, 4) if breakfast_only else gemini_options[:4]
+            if breakfast_only:
+                options = _build_breakfast_combo_options(gemini_options, 4)
+            else:
+                options = gemini_options[:4]
             source_note = " (con IA)"
         else:
             if weekly_used_norm and not explicit_repeat:
@@ -4289,10 +4391,19 @@ class ChatService:
 
             # Fresh complete first, then stale complete, incomplete only as last resort
             ranked_pool = fresh_complete + stale_complete + incomplete
-            options = _select_breakfast_varied_options(ranked_pool, 4) if breakfast_only else ranked_pool[:4]
+            if breakfast_only:
+                options = _build_breakfast_combo_options(ranked_pool, 4)
+            else:
+                options = ranked_pool[:4]
             source_note = ""
 
         if not options:
+            if breakfast_only:
+                return (
+                    "Para desayuno en modo combo necesito al menos una bebida y un acompañamiento "
+                    "(pan/sanguche o fruta/ensalada) con stock en cocina o refri. "
+                    "Actualiza stock y te armo combos completos de 2 elementos."
+                )
             healthy_note = " saludables" if healthy_only else ""
             repeat_note = (
                 " Esta semana evité repetir las que ya preparaste. Si quieres repetir una puntual, "
@@ -4322,6 +4433,7 @@ class ChatService:
         lines = []
         if breakfast_only:
             grouped: dict[str, list[tuple[int, dict]]] = {
+                "Combos": [],
                 "Bebidas": [],
                 "Panes/Sanguches": [],
                 "Frutas": [],
@@ -4332,7 +4444,7 @@ class ChatService:
                 label = _breakfast_block_label(str(item.get("name", "")))
                 grouped[label].append((idx, item))
 
-            ordered_blocks = ("Bebidas", "Panes/Sanguches", "Frutas", "Otras opciones")
+            ordered_blocks = ("Combos", "Bebidas", "Panes/Sanguches", "Frutas", "Otras opciones")
             for block in ordered_blocks:
                 block_items = grouped[block]
                 if not block_items:

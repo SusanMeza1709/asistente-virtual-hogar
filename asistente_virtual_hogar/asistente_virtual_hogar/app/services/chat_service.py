@@ -1477,6 +1477,10 @@ class ChatService:
                 return f"Solo tengo {len(options)} opciones activas. Elige receta 1 hasta receta {len(options)}."
 
             chosen = options[selected_index - 1]
+            try:
+                ChatService._remember_recipe_usage(db, chosen.get("name", "Receta"))
+            except Exception:
+                pass
             recipe_text = ChatService._build_recipe_detail_text(
                 chosen.get("name", "Receta"),
                 list(chosen.get("matched") or []),
@@ -2916,6 +2920,8 @@ class ChatService:
             r"\b(?:quiero|necesito|dame|sugi[eé]reme)\s+algo\s+para\s+(?:desayunar|almorzar|cenar)\b",
             r"\b(?:que|qué)\s+puedo\s+(?:desayunar|almorzar|cenar)\b",
             r"\b(?:ideas|opciones)\s+para\s+(?:desayuno|almuerzo|cena)\b",
+            r"\b(?:repite|repetir|otra\s+vez|de\s+nuevo)\b.*\b(?:receta|plato|cocinar|preparar|comer)\b",
+            r"\b(?:la\s+del|receta\s+del)\s+(?:lunes|martes|miercoles|miércoles|jueves|viernes|sabado|sábado|domingo)\b",
         )
         return any(re.search(pattern, text_n) for pattern in patterns)
 
@@ -3064,6 +3070,93 @@ class ChatService:
         lines.append("")
         lines.append("Nota mascota: evita darle cebolla, ajo, uvas o chocolate.")
         return "\n".join(lines)
+
+    @staticmethod
+    def _get_weekly_recipe_history(db: Session) -> list[dict]:
+        item = MemoryService.get_by_key(db, "__recipe_history__")
+        if not item or not item.value:
+            return []
+        try:
+            import json
+
+            data = json.loads(item.value)
+            if isinstance(data, list):
+                return [entry for entry in data if isinstance(entry, dict)]
+        except Exception:
+            return []
+        return []
+
+    @staticmethod
+    def _save_weekly_recipe_history(db: Session, history: list[dict]) -> None:
+        import json
+
+        # Keep only recent entries to avoid unbounded growth.
+        compact = history[-60:]
+        MemoryService.save_item(
+            db,
+            MemoryCreate(key="__recipe_history__", value=json.dumps(compact, ensure_ascii=False)),
+        )
+
+    @staticmethod
+    def _remember_recipe_usage(db: Session, recipe_name: str) -> None:
+        today = datetime.utcnow().date()
+        weekday_names = ["lunes", "martes", "miercoles", "jueves", "viernes", "sabado", "domingo"]
+        iso_week = today.isocalendar()
+        week_marker = f"{iso_week.year}-W{iso_week.week:02d}"
+        entry = {
+            "name": str(recipe_name).strip(),
+            "date": today.isoformat(),
+            "week": week_marker,
+            "weekday": weekday_names[today.weekday()],
+        }
+
+        history = ChatService._get_weekly_recipe_history(db)
+        history.append(entry)
+        ChatService._save_weekly_recipe_history(db, history)
+
+    @staticmethod
+    def _weekly_used_recipe_names(db: Session) -> list[str]:
+        today = datetime.utcnow().date()
+        iso_week = today.isocalendar()
+        week_marker = f"{iso_week.year}-W{iso_week.week:02d}"
+        history = ChatService._get_weekly_recipe_history(db)
+
+        names: list[str] = []
+        seen = set()
+        for entry in history:
+            if str(entry.get("week", "")) != week_marker:
+                continue
+            name = str(entry.get("name", "")).strip()
+            name_n = ChatService._normalize(name)
+            if not name or name_n in seen:
+                continue
+            seen.add(name_n)
+            names.append(name)
+        return names
+
+    @staticmethod
+    def _is_explicit_repeat_request(text_n: str, weekly_recipe_names: list[str]) -> bool:
+        repeat_hints = (
+            "repite",
+            "repetir",
+            "repitela",
+            "repitelo",
+            "la misma",
+            "otra vez",
+            "de nuevo",
+        )
+        weekday_hints = ("lunes", "martes", "miercoles", "miércoles", "jueves", "viernes", "sabado", "sábado", "domingo")
+
+        if ChatService._contains_any(text_n, repeat_hints) or ChatService._contains_any(text_n, weekday_hints):
+            return True
+
+        for name in weekly_recipe_names:
+            name_n = ChatService._normalize(name)
+            if len(name_n) < 4:
+                continue
+            if re.search(rf"\b{re.escape(name_n)}\b", text_n):
+                return True
+        return False
 
     @staticmethod
     def _call_gemini_for_recipes(
@@ -3361,6 +3454,9 @@ class ChatService:
         healthy_only = _is_healthy_requested(text_n)
         time_pref = _requested_time_preference(text_n)
         budget_pref = _requested_budget_preference(text_n)
+        weekly_used_names = ChatService._weekly_used_recipe_names(db)
+        weekly_used_norm = {ChatService._normalize(name) for name in weekly_used_names}
+        explicit_repeat = ChatService._is_explicit_repeat_request(text_n, weekly_used_names)
 
         def _has_any(keys: tuple[str, ...]) -> bool:
             return any(_has_ingredient(key, available_names) for key in keys)
@@ -3554,10 +3650,22 @@ class ChatService:
             last_shown=last_shown,
         )
 
+        if gemini_options and weekly_used_norm and not explicit_repeat:
+            gemini_options = [
+                item for item in gemini_options
+                if ChatService._normalize(item.get("name", "")) not in weekly_used_norm
+            ]
+
         if gemini_options:
             options = gemini_options
             source_note = " (con IA)"
         else:
+            if weekly_used_norm and not explicit_repeat:
+                candidates = [
+                    item for item in candidates
+                    if ChatService._normalize(item.get("name", "")) not in weekly_used_norm
+                ]
+
             # Local engine: prefer complete recipes, shuffle within tier for variety
             candidates.sort(key=lambda item: (item["is_complete"], item["score"]), reverse=True)
             complete = [c for c in candidates if c["is_complete"]]
@@ -3577,9 +3685,16 @@ class ChatService:
 
         if not options:
             healthy_note = " saludables" if healthy_only else ""
+            repeat_note = (
+                " Esta semana evité repetir las que ya preparaste. Si quieres repetir una puntual, "
+                "pídela por nombre o por día (ej: la del lunes)."
+                if weekly_used_norm and not explicit_repeat
+                else ""
+            )
             return (
                 f"No encontré recetas completas{healthy_note} con lo que tienes en cocina y refri. "
                 "Agrega más ingredientes y te doy nuevas opciones."
+                + repeat_note
             )
 
         _PENDING.clear()
@@ -3613,8 +3728,13 @@ class ChatService:
             lines.append(f"Receta {idx}: {item['name']} ({item['meal']}) - {suffix}")
 
         healthy_header = " saludables" if healthy_only else ""
+        weekly_note = (
+            " sin repetir las que ya preparaste esta semana"
+            if weekly_used_norm and not explicit_repeat
+            else ""
+        )
         return (
-            f"Te propongo estas recetas{healthy_header} con lo que tienes en cocina y refri{source_note}, priorizando las completas:\n"
+            f"Te propongo estas recetas{healthy_header} con lo que tienes en cocina y refri{source_note}{weekly_note}, priorizando las completas:\n"
             + "\n".join(lines)
             + "\n\nDime cuál deseas: receta 1, receta 2, receta 3 o receta 4."
         )

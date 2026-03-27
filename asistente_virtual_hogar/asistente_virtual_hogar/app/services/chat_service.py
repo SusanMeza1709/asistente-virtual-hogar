@@ -755,7 +755,7 @@ class ChatService:
         return None
 
     @staticmethod
-    def _is_total_price_phrase(text_n: str, qty: float) -> bool:
+    def _is_total_price_phrase(text_n: str, qty: float, raw_price: float | None = None) -> bool:
         if qty <= 0:
             return False
         unit_price_hints = (
@@ -771,20 +771,38 @@ class ChatService:
         if ChatService._contains_any(text_n, unit_price_hints):
             return False
 
-        # In natural speech, totals are most common when quantity is fractional
-        # (e.g., "medio kilo ... a 3.50"). Whole quantities are usually unit price.
+        # Explicit total-price keywords
+        total_hints = (
+            "en total",
+            "por todos",
+            "por todo",
+            "en conjunto",
+            "el total",
+            "me costaron",
+            "me costó todo",
+        )
+        if ChatService._contains_any(text_n, total_hints):
+            return True
+
+        # Fractional quantities are almost always totals
         fractional_hint = (
             qty < 1
             or ChatService._contains_any(text_n, ("medio", "media", "cuarto", "tres cuartos", "1/2", "1/4", "3/4"))
         )
-        if not fractional_hint:
-            return False
-
-        if re.search(
+        if fractional_hint and re.search(
             r"\b(?:a|por|costo|cost[óo]|me\s+costo|me\s+cost[óo])\s+(?:s\/|s\.)?\s*(?:\d+(?:[.,]\d+)?|un\s+sol|\d+\s+sol(?:es)?(?:\s+con\s+\d{1,2}(?:\s+centimos?)?)?|\d+\s+sol(?:es)?\s+\d{1,2}(?:\s+centimos?)?|(?:dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce|trece|catorce|quince|veinte)\s+sol(?:es)?)\b",
             text_n,
         ):
             return True
+
+        # When buying multiple whole units: treat price as total if the implied
+        # per-unit cost would be implausibly low (< 0.10 soles each).
+        # Example: "compré 6 hongos a 1 sol" → 1/6 = 0.17 → total.
+        if qty > 1 and raw_price is not None and raw_price > 0:
+            implied_unit = raw_price / qty
+            if implied_unit < 0.10:
+                return True
+
         return False
 
     @staticmethod
@@ -1103,13 +1121,19 @@ class ChatService:
 
         by_normalized: dict = {}
         for product in products:
-            by_normalized[ChatService._normalize(product.name)] = product
+            key = ChatService._normalize(product.name)
+            # Skip products with 1-2 char names from flexible matching to avoid false hits.
+            if len(key) <= 2:
+                continue
+            by_normalized[key] = product
 
         if normalized_target in by_normalized:
             return by_normalized[normalized_target]
 
         partial = [item for key, item in by_normalized.items() if normalized_target and normalized_target in key]
         if partial:
+            # Prefer the longest/closest match over the first arbitrary one.
+            partial.sort(key=lambda p: SequenceMatcher(None, normalized_target, ChatService._normalize(p.name)).ratio(), reverse=True)
             return partial[0]
 
         close = get_close_matches(normalized_target, list(by_normalized.keys()), n=1, cutoff=0.6)
@@ -1711,7 +1735,7 @@ class ChatService:
                 not consume
                 and unit_price is not None
                 and reference_qty is None
-                and ChatService._is_total_price_phrase(text_n, qty)
+                and ChatService._is_total_price_phrase(text_n, qty, unit_price)
                 and qty > 0
             ):
                 unit_price = unit_price / qty

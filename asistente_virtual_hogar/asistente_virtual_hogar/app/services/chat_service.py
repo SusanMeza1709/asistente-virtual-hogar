@@ -3565,6 +3565,16 @@ class ChatService:
         def _requested_budget_preference(user_text_n: str) -> bool:
             return bool(re.search(r"\b(barato|economico|económico|ahorrar|ahorro|bajo\s+costo)\b", user_text_n))
 
+        def _breakfast_block_label(recipe_name: str) -> str:
+            name_n = ChatService._normalize(recipe_name)
+            if any(token in name_n for token in ("jugo", "batido", "licuado", "bebida", "limonada", "infusion", "infusion")):
+                return "Bebidas"
+            if any(token in name_n for token in ("pan", "tostada", "sanguche", "sandwich", "sanduche")):
+                return "Panes/Sanguches"
+            if any(token in name_n for token in ("fruta", "ensalada de frutas", "yogurt")):
+                return "Frutas"
+            return "Otras opciones"
+
         ingredient_aliases: dict[str, tuple[str, ...]] = {
             "avena": ("avena", "quaker"),
             "quaker": ("avena", "quaker"),
@@ -4264,21 +4274,61 @@ class ChatService:
             pass
 
         lines = []
-        for idx, item in enumerate(options, start=1):
-            notes: list[str] = []
-            if item.get("missing"):
-                missing_text = ", ".join(item["missing"])
-                notes.append(f"te faltaria: {missing_text}")
-            else:
-                notes.append("completa con lo que tienes")
+        breakfast_only = len(requested_meals) == 1 and requested_meals[0] == "desayuno"
 
-            if item.get("prep_minutes") is not None:
-                notes.append(f"{item['prep_minutes']} min")
-            if item.get("cost_estimate") is not None:
-                notes.append(f"S/ {ChatService._fmt_num(item['cost_estimate'])}")
+        if breakfast_only:
+            grouped: dict[str, list[tuple[int, dict]]] = {
+                "Bebidas": [],
+                "Panes/Sanguches": [],
+                "Frutas": [],
+                "Otras opciones": [],
+            }
 
-            suffix = " | ".join(notes)
-            lines.append(f"Receta {idx}: {item['name']} ({item['meal']}) - {suffix}")
+            for idx, item in enumerate(options, start=1):
+                label = _breakfast_block_label(str(item.get("name", "")))
+                grouped[label].append((idx, item))
+
+            ordered_blocks = ("Bebidas", "Panes/Sanguches", "Frutas", "Otras opciones")
+            for block in ordered_blocks:
+                block_items = grouped[block]
+                if not block_items:
+                    continue
+                lines.append(f"{block}:")
+                for idx, item in block_items:
+                    notes: list[str] = []
+                    if item.get("missing"):
+                        missing_text = ", ".join(item["missing"])
+                        notes.append(f"te faltaria: {missing_text}")
+                    else:
+                        notes.append("completa con lo que tienes")
+
+                    if item.get("prep_minutes") is not None:
+                        notes.append(f"{item['prep_minutes']} min")
+                    if item.get("cost_estimate") is not None:
+                        notes.append(f"S/ {ChatService._fmt_num(item['cost_estimate'])}")
+
+                    suffix = " | ".join(notes)
+                    lines.append(f"Receta {idx}: {item['name']} ({item['meal']}) - {suffix}")
+                lines.append("")
+
+            if lines and lines[-1] == "":
+                lines.pop()
+        else:
+            for idx, item in enumerate(options, start=1):
+                notes: list[str] = []
+                if item.get("missing"):
+                    missing_text = ", ".join(item["missing"])
+                    notes.append(f"te faltaria: {missing_text}")
+                else:
+                    notes.append("completa con lo que tienes")
+
+                if item.get("prep_minutes") is not None:
+                    notes.append(f"{item['prep_minutes']} min")
+                if item.get("cost_estimate") is not None:
+                    notes.append(f"S/ {ChatService._fmt_num(item['cost_estimate'])}")
+
+                suffix = " | ".join(notes)
+                lines.append(f"Receta {idx}: {item['name']} ({item['meal']}) - {suffix}")
 
         healthy_header = " saludables" if healthy_only else ""
         weekly_note = (

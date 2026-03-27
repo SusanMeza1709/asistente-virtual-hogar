@@ -96,6 +96,7 @@
 
     const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     const STORAGE_KEY = 'asistente_hogar_historial';
+    const VOICE_STORAGE_KEY = 'asistente_hogar_voice_name';
     let recognition = null;
     let lastAssistantReply = '';
     let conversation = [];
@@ -105,33 +106,77 @@
       return (window.speechSynthesis && window.speechSynthesis.getVoices()) || [];
     }
 
+    function normalizeText(value) {
+      return String(value || '')
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '');
+    }
+
+    function getPreferredVoice(voices) {
+      if (!voices.length) return null;
+
+      const preferredNames = [
+        'microsoft sabina',
+        'microsoft paloma',
+        'microsoft dahlia',
+        'microsoft jorge',
+        'google espanol latinoamericano',
+        'google spanish latin',
+        'google espanol de estados unidos'
+      ];
+
+      for (const token of preferredNames) {
+        const byName = voices.find((v) => normalizeText(v.name).includes(token));
+        if (byName) return byName;
+      }
+
+      const rankedLang = ['es-pe', 'es-mx', 'es-us', 'es-ar', 'es-co', 'es-cl', 'es-es'];
+      for (const langCode of rankedLang) {
+        const byLang = voices.find((v) => normalizeText(v.lang).includes(langCode));
+        if (byLang) return byLang;
+      }
+
+      return voices.find((v) => normalizeText(v.lang).startsWith('es')) || null;
+    }
+
     function populateVoiceSelector() {
       const sel = document.getElementById('voiceSelect');
       const voices = getAllVoices();
       if (!voices.length) return;
       sel.innerHTML = '';
+      const savedVoiceName = localStorage.getItem(VOICE_STORAGE_KEY);
       voices.forEach((v, i) => {
         const opt = document.createElement('option');
         opt.value = i;
         opt.textContent = `${v.name} (${v.lang})`;
-        // auto-select best Spanish voice by default
-        if (manualVoiceIndex === null && String(v.lang || '').toLowerCase().startsWith('es')) {
-          const ranked = ['es-pe','es-mx','es-us','es-ar','es-co','es-cl','es-es'];
-          const current = sel.querySelector('option[selected]');
-          const curLang = current ? voices[parseInt(current.value)].lang.toLowerCase() : '';
-          const newLang = v.lang.toLowerCase();
-          const newRank = ranked.findIndex(r => newLang.includes(r));
-          const curRank = ranked.findIndex(r => curLang.includes(r));
-          if (!current || (newRank !== -1 && (curRank === -1 || newRank < curRank))) {
-            opt.selected = true;
-          }
-        }
         sel.appendChild(opt);
       });
-      // if nothing was auto-selected, select first Spanish voice found
-      if (!sel.querySelector('option[selected]')) {
-        const firstSpanish = voices.findIndex(v => String(v.lang || '').toLowerCase().startsWith('es'));
-        if (firstSpanish !== -1) sel.value = firstSpanish;
+
+      // 1) keep explicit user selection if still available
+      if (manualVoiceIndex !== null && voices[manualVoiceIndex]) {
+        sel.value = String(manualVoiceIndex);
+        return;
+      }
+
+      // 2) restore previously chosen voice by name
+      if (savedVoiceName) {
+        const idxByName = voices.findIndex((v) => v.name === savedVoiceName);
+        if (idxByName !== -1) {
+          sel.value = String(idxByName);
+          manualVoiceIndex = idxByName;
+          return;
+        }
+      }
+
+      // 3) auto pick the best LATAM Spanish option
+      const preferred = getPreferredVoice(voices);
+      if (preferred) {
+        const preferredIndex = voices.findIndex((v) => v.name === preferred.name && v.lang === preferred.lang);
+        if (preferredIndex !== -1) {
+          sel.value = String(preferredIndex);
+          manualVoiceIndex = preferredIndex;
+        }
       }
     }
 
@@ -139,7 +184,10 @@
       const sel = document.getElementById('voiceSelect');
       const voices = getAllVoices();
       const idx = parseInt(sel.value);
-      return (!isNaN(idx) && voices[idx]) ? voices[idx] : null;
+      if (!isNaN(idx) && voices[idx]) {
+        return voices[idx];
+      }
+      return getPreferredVoice(voices);
     }
 
     function nowLabel() {
@@ -197,6 +245,10 @@
     function speak(text) {
       if (!window.speechSynthesis) return;
       window.speechSynthesis.cancel();
+
+      if (!getAllVoices().length) {
+        populateVoiceSelector();
+      }
 
       const clean = prepareForSpeech(String(text || '').trim());
       if (!clean) return;
@@ -263,6 +315,10 @@
     });
     document.getElementById('voiceSelect').addEventListener('change', () => {
       manualVoiceIndex = parseInt(document.getElementById('voiceSelect').value);
+      const selected = getSelectedVoice();
+      if (selected?.name) {
+        localStorage.setItem(VOICE_STORAGE_KEY, selected.name);
+      }
     });
 
     loadConversation();

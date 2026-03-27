@@ -3159,6 +3159,40 @@ class ChatService:
         return False
 
     @staticmethod
+    def _extract_weekday_reference(text_n: str) -> str | None:
+        weekday_aliases = {
+            "lunes": "lunes",
+            "martes": "martes",
+            "miercoles": "miercoles",
+            "miércoles": "miercoles",
+            "jueves": "jueves",
+            "viernes": "viernes",
+            "sabado": "sabado",
+            "sábado": "sabado",
+            "domingo": "domingo",
+        }
+        for token, canonical in weekday_aliases.items():
+            if re.search(rf"\b{re.escape(token)}\b", text_n):
+                return canonical
+        return None
+
+    @staticmethod
+    def _weekly_recipe_for_weekday(db: Session, weekday: str) -> dict | None:
+        today = datetime.utcnow().date()
+        iso_week = today.isocalendar()
+        week_marker = f"{iso_week.year}-W{iso_week.week:02d}"
+        history = ChatService._get_weekly_recipe_history(db)
+        # Return the latest recipe used for the requested day in the current week.
+        for entry in reversed(history):
+            if str(entry.get("week", "")) != week_marker:
+                continue
+            if ChatService._normalize(str(entry.get("weekday", ""))) != ChatService._normalize(weekday):
+                continue
+            if str(entry.get("name", "")).strip():
+                return entry
+        return None
+
+    @staticmethod
     def _call_gemini_for_recipes(
         available_ingredients: list[str],
         meal_hints: list[str],
@@ -3457,6 +3491,8 @@ class ChatService:
         weekly_used_names = ChatService._weekly_used_recipe_names(db)
         weekly_used_norm = {ChatService._normalize(name) for name in weekly_used_names}
         explicit_repeat = ChatService._is_explicit_repeat_request(text_n, weekly_used_names)
+        weekday_ref = ChatService._extract_weekday_reference(text_n)
+        weekday_recipe_entry = ChatService._weekly_recipe_for_weekday(db, weekday_ref) if weekday_ref else None
 
         def _has_any(keys: tuple[str, ...]) -> bool:
             return any(_has_ingredient(key, available_names) for key in keys)
@@ -3733,8 +3769,15 @@ class ChatService:
             if weekly_used_norm and not explicit_repeat
             else ""
         )
+        recall_prefix = ""
+        if weekday_recipe_entry:
+            day_text = str(weekday_recipe_entry.get("weekday", weekday_ref or "")).strip()
+            recipe_text = str(weekday_recipe_entry.get("name", "")).strip()
+            if day_text and recipe_text:
+                recall_prefix = f"El {day_text} preparaste {recipe_text}.\n"
         return (
-            f"Te propongo estas recetas{healthy_header} con lo que tienes en cocina y refri{source_note}{weekly_note}, priorizando las completas:\n"
+            recall_prefix
+            + f"Te propongo estas recetas{healthy_header} con lo que tienes en cocina y refri{source_note}{weekly_note}, priorizando las completas:\n"
             + "\n".join(lines)
             + "\n\nDime cuál deseas: receta 1, receta 2, receta 3 o receta 4."
         )

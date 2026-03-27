@@ -899,6 +899,38 @@ class ChatService:
             header += f" {unchanged} ya estaban correctos."
         return header + "\n" + "\n".join(changed)
 
+    # -----------------------------------------------------------------------
+    # Weight-unit helpers
+    # -----------------------------------------------------------------------
+
+    _WEIGHT_UNITS = {"kilo", "gramo"}
+
+    @staticmethod
+    def _is_weight_unit(unit: str | None) -> bool:
+        """Return True when *unit* is a weight measure (kilo, gramo)."""
+        if unit is None:
+            return False
+        return ChatService._normalize_unit_label(unit) in ChatService._WEIGHT_UNITS
+
+    @staticmethod
+    def _extract_unit_count_from_purchase(text_n: str) -> int | None:
+        """
+        Detect phrases like  'vienen 10', 'son 10 unidades', 'traen 5',
+        'hay 12 naranjas', etc. that tell us how many pieces came in a
+        weight purchase.  Returns the integer count or None.
+        """
+        patterns = [
+            r"\b(?:vienen?|traen?|son|hay|tiene[n]?|trae)\s+(?P<n>\d+)\b",
+            r"\b(?P<n>\d+)\s+(?:unidades?|piezas?|frut[ao]s?)\b",
+        ]
+        for pat in patterns:
+            m = re.search(pat, text_n)
+            if m:
+                val = int(m.group("n"))
+                if val > 0:
+                    return val
+        return None
+
     @staticmethod
     def _convert_qty_between_units(qty: float, source_unit: str | None, target_unit: str | None) -> float | None:
         if qty < 0:
@@ -1664,6 +1696,37 @@ class ChatService:
             # Quantity is already converted to the newly created product unit.
             input_unit = product.unit
 
+        # ── Weight-to-unit special case ──────────────────────────────────
+        # e.g. "compré 1 kilo de naranjas a 3 soles, vienen 10"
+        # Product is stored as "unidad" but user bought by weight.
+        # If the user tells us the count we can derive per-unit price.
+        weight_to_unit_note = ""
+        if (
+            not consume
+            and ChatService._is_weight_unit(input_unit)
+            and product.unit == "unidad"
+        ):
+            piece_count = ChatService._extract_unit_count_from_purchase(text_n)
+            if piece_count:
+                # We know how many pieces: qty = piece_count, price per unit = total/count
+                if unit_price is not None and unit_price > 0:
+                    total_paid = unit_price * qty          # price was per-kilo * kilos
+                    unit_price = round(total_paid / piece_count, 4)
+                    weight_to_unit_note = (
+                        f" ({ChatService._fmt_num(qty)} {input_unit} → "
+                        f"{piece_count} unidades a {ChatService._fmt_num(unit_price)} c/u)"
+                    )
+                else:
+                    weight_to_unit_note = (
+                        f" ({ChatService._fmt_num(qty)} {input_unit} → {piece_count} unidades)"
+                    )
+                qty = float(piece_count)
+                input_unit = "unidad"
+            else:
+                # No piece count provided — store by weight despite product.unit being "unidad".
+                # Treat the weight qty as-is and override product.unit for this transaction.
+                input_unit = product.unit  # skip kilo→unidad conversion (can't without count)
+
         qty_for_product_unit = ChatService._convert_qty_between_units(qty, input_unit, product.unit)
         if qty_for_product_unit is None:
             return (
@@ -1701,10 +1764,12 @@ class ChatService:
             return (
                 f"Compré {qty_str} {unit} de {product.name} a {ChatService._fmt_num(unit_price)} c/u. "
                 f"Gasto registrado: {amount}. Ahora tienes {total} {unit} en casa."
+                + weight_to_unit_note
             )
         return (
             f"Compré {qty_str} {unit} de {product.name}. "
             f"Ahora tienes {total} {unit} en casa."
+            + weight_to_unit_note
         )
 
     @staticmethod

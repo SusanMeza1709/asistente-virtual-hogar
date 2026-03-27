@@ -3674,6 +3674,96 @@ class ChatService:
 
             return combos[:max_options]
 
+        def _build_lunch_combo_options(pool: list[dict], max_options: int = 4) -> list[dict]:
+            """Pick lunch combos with exactly 2 elements: plato principal + bebida/acompanamiento."""
+            beverages = [item for item in pool if _breakfast_block_label(str(item.get("name", ""))) == "Bebidas"]
+            companions = [
+                item for item in pool
+                if _breakfast_block_label(str(item.get("name", ""))) in ("Frutas", "Otras opciones")
+            ]
+            mains = [
+                item for item in pool
+                if item not in beverages and item not in companions
+            ]
+
+            if not mains:
+                return []
+
+            combos: list[dict] = []
+            used_pairs = set()
+
+            for index, main in enumerate(mains):
+                if len(combos) >= max_options:
+                    break
+
+                partner = None
+                if beverages:
+                    partner = beverages[index % len(beverages)]
+                elif companions:
+                    partner = companions[index % len(companions)]
+
+                if not partner:
+                    continue
+
+                pair_key = (
+                    ChatService._normalize(str(main.get("name", ""))),
+                    ChatService._normalize(str(partner.get("name", ""))),
+                )
+                if pair_key in used_pairs:
+                    continue
+                used_pairs.add(pair_key)
+
+                m_name = str(main.get("name", "Plato principal"))
+                p_name = str(partner.get("name", "Acompanamiento"))
+                m_steps = list(main.get("steps") or [])[:5]
+                p_steps = list(partner.get("steps") or [])[:3]
+
+                combo_steps = [f"Plato principal - {m_name}: {step}" for step in m_steps] + [
+                    f"Bebida/Acompanamiento - {p_name}: {step}" for step in p_steps
+                ]
+
+                m_matched = list(main.get("matched") or [])
+                p_matched = list(partner.get("matched") or [])
+                m_missing = list(main.get("missing") or [])
+                p_missing = list(partner.get("missing") or [])
+                m_missing_fridge = list(main.get("missing_in_fridge") or [])
+                p_missing_fridge = list(partner.get("missing_in_fridge") or [])
+                m_cond_ok = list(main.get("condiments_available") or [])
+                p_cond_ok = list(partner.get("condiments_available") or [])
+                m_cond_miss = list(main.get("condiments_missing") or [])
+                p_cond_miss = list(partner.get("condiments_missing") or [])
+
+                m_cost = main.get("cost_estimate")
+                p_cost = partner.get("cost_estimate")
+                combo_cost = None
+                if m_cost is not None or p_cost is not None:
+                    combo_cost = round(float(m_cost or 0) + float(p_cost or 0), 2)
+
+                m_prep = int(main.get("prep_minutes") or 0)
+                p_prep = int(partner.get("prep_minutes") or 0)
+                combo_prep = max(15, m_prep + p_prep)
+
+                combos.append(
+                    {
+                        "name": f"Combo almuerzo: {m_name} + {p_name}",
+                        "meal": "almuerzo",
+                        "is_complete": bool(main.get("is_complete", False)) and bool(partner.get("is_complete", False)),
+                        "score": int(main.get("score", 0)) + int(partner.get("score", 0)) + 20,
+                        "matched": _merge_unique_items(m_matched + p_matched),
+                        "missing": _merge_unique_items(m_missing + p_missing),
+                        "missing_in_fridge": _merge_unique_items(m_missing_fridge + p_missing_fridge),
+                        "steps": combo_steps,
+                        "beverage_hint": p_name if _breakfast_block_label(p_name) == "Bebidas" else None,
+                        "prep_minutes": combo_prep,
+                        "cost_estimate": combo_cost,
+                        "condiments_available": _merge_unique_items(m_cond_ok + p_cond_ok),
+                        "condiments_missing": _merge_unique_items(m_cond_miss + p_cond_miss),
+                        "source": str(main.get("source") or partner.get("source") or "combo"),
+                    }
+                )
+
+            return combos[:max_options]
+
         def _select_breakfast_varied_options(pool: list[dict], max_options: int = 4) -> list[dict]:
             """Pick breakfast options with block diversity using ranked pool order.
             Target mix: up to 2 bebidas, up to 1 pan/sanguche, up to 1 frutas."""
@@ -3949,6 +4039,8 @@ class ChatService:
 
         requested_meals = _requested_meals(text_n)
         breakfast_only = len(requested_meals) == 1 and requested_meals[0] == "desayuno"
+        lunch_only = len(requested_meals) == 1 and requested_meals[0] == "almuerzo"
+        dinner_only = len(requested_meals) == 1 and requested_meals[0] == "cena"
         healthy_only = _is_healthy_requested(text_n)
         time_pref = _requested_time_preference(text_n)
         budget_pref = _requested_budget_preference(text_n)
@@ -4284,6 +4376,18 @@ class ChatService:
 
             prep_minutes = _estimate_prep_minutes(recipe)
 
+            if dinner_only:
+                recipe_name_n = ChatService._normalize(str(recipe.get("name", "")))
+                is_heavy_name = any(
+                    token in recipe_name_n
+                    for token in ("guiso", "olla", "arroz con pollo", "lentejas", "garbanzo", "chaufa", "saltado", "salteado")
+                )
+                is_light = (recipe.get("healthy") and prep_minutes <= 20) or any(
+                    token in recipe_name_n for token in ("ensalada", "yogurt", "tortilla", "omelette", "jugo", "batido", "sopa ligera")
+                )
+                if is_heavy_name or not is_light:
+                    continue
+
             if time_pref == "rapido":
                 score += max(0, 40 - prep_minutes)
             elif time_pref == "elaborado":
@@ -4366,6 +4470,8 @@ class ChatService:
         if gemini_options:
             if breakfast_only:
                 options = _build_breakfast_combo_options(gemini_options, 4)
+            elif lunch_only:
+                options = _build_lunch_combo_options(gemini_options, 4)
             else:
                 options = gemini_options[:4]
             source_note = " (con IA)"
@@ -4393,6 +4499,8 @@ class ChatService:
             ranked_pool = fresh_complete + stale_complete + incomplete
             if breakfast_only:
                 options = _build_breakfast_combo_options(ranked_pool, 4)
+            elif lunch_only:
+                options = _build_lunch_combo_options(ranked_pool, 4)
             else:
                 options = ranked_pool[:4]
             source_note = ""
@@ -4403,6 +4511,16 @@ class ChatService:
                     "Para desayuno en modo combo necesito al menos una bebida y un acompañamiento "
                     "(pan/sanguche o fruta/ensalada) con stock en cocina o refri. "
                     "Actualiza stock y te armo combos completos de 2 elementos."
+                )
+            if lunch_only:
+                return (
+                    "Para almuerzo en modo combo necesito al menos un plato principal y una bebida/acompañamiento "
+                    "con stock en cocina o refri. Actualiza stock y te armo combos completos de 2 elementos."
+                )
+            if dinner_only:
+                return (
+                    "Para cena te estoy proponiendo solo opciones ligeras. "
+                    "Si quieres más variedad, agrega ingredientes livianos (frutas, yogurt, verduras, pan, huevo)."
                 )
             healthy_note = " saludables" if healthy_only else ""
             repeat_note = (

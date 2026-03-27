@@ -2011,8 +2011,9 @@ class ChatService:
         patterns = [
             r"(?:actualiza|actualizar|pon|poner|cambia|cambiar|registra|registrar)\s+(?:el\s+)?precio\s+(?:de|del|para)\s+(?P<name>.+?)\s+(?:a|por|en)\s+(?P<price>.+)",
             r"precio\s+(?:de|del)\s+(?P<name>.+?)\s+(?:es|seria|sería)\s+(?P<price>.+)",
+            r"precio\s+(?:de|del)\s+(?P<name>.+?)\s+(?:a|por|en)\s+(?P<price>.+)",
             # Reference price without buy intent, e.g. "1 detergente opal a 8 soles"
-            r"^(?P<qty>\d+(?:[.,]\d+)?)\s+(?P<name>.+?)\s+(?:a|por)\s+(?P<price>.+)$",
+            r"^(?P<qty>\d+(?:[.,]\d+)?|un|uno|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\s+(?P<name>.+?)\s+(?:a|por)\s+(?P<price>.+)$",
         ]
 
         parsed_name: str | None = None
@@ -2033,6 +2034,13 @@ class ChatService:
 
             name_raw = match.group("name")
             price_raw = match.group("price")
+            # In voice inputs we may get a leading spoken quantity/article in the name.
+            # Example: "un detergente opal a 8 soles" -> name "detergente opal".
+            name_raw = re.sub(
+                r"^\s*(?:\d+(?:[.,]\d+)?|un|uno|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\s+",
+                "",
+                name_raw,
+            )
             name = ChatService._clean_candidate_name(name_raw).title()
             if not name:
                 return "Entendí que quieres actualizar un precio, pero no capté el producto."

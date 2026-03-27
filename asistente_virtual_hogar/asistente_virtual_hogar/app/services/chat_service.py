@@ -2360,6 +2360,9 @@ class ChatService:
         alerts = AlertService.build_alerts(db)
         chunks: list[str] = []
 
+        if alerts.shopping_list:
+            chunks.append(f"- {len(alerts.shopping_list)} producto(s) sin stock para comprar")
+
         if alerts.expired:
             chunks.append(f"- {len(alerts.expired)} producto(s) vencido(s)")
         if alerts.expiring_soon:
@@ -2673,6 +2676,13 @@ class ChatService:
         if ChatService._contains_any(text_i, ChatService.ALERT_HINTS):
             alerts = AlertService.build_alerts(db)
             chunks: list = []
+            if alerts.shopping_list:
+                chunks.append(
+                    "Comprar ahora (sin stock):\n" + "\n".join(
+                        f"- Comprar {item.product_name}"
+                        for item in alerts.shopping_list
+                    )
+                )
             if alerts.expired:
                 chunks.append(
                     "Vencidos:\n" + "\n".join(

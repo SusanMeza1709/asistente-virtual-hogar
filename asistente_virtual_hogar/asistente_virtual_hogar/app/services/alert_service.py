@@ -39,7 +39,10 @@ class AlertService:
             if product.expiration_date:
                 days_until_expiration = (product.expiration_date - today).days
 
-            if product.stock_current <= product.stock_minimum:
+            # Low stock means there is still some stock left (> 0) but it is
+            # below/equal minimum. Out-of-stock (== 0) is handled separately
+            # in shopping_list with reason "sin_stock".
+            if 0 < product.stock_current <= product.stock_minimum:
                 low_stock.append(
                     AlertItem(
                         product_name=product.name,
@@ -52,12 +55,15 @@ class AlertService:
                         suggested_action="agregar_a_lista_de_compras",
                     )
                 )
+
+            # Shopping list should include only products that are out of stock.
+            if product.stock_current <= 0:
                 shopping_list.append(
                     ShoppingListItem(
                         product_name=product.name,
                         needed_quantity=max(product.stock_minimum - product.stock_current, 1),
                         unit=product.unit,
-                        reason="stock_bajo",
+                        reason="sin_stock",
                     )
                 )
 

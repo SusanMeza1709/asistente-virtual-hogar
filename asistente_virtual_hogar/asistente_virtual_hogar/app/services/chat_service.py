@@ -1707,10 +1707,13 @@ class ChatService:
                 + "\n".join(f"- {item}" for item in created)
             )
         if already_present:
-            lines.append(
-                "Estos ya existían en tu inventario:\n"
-                + "\n".join(f"- {item}" for item in already_present)
+            already_count = len(already_present)
+            already_header = (
+                "Este producto ya existía en tu inventario:\n"
+                if already_count == 1
+                else "Estos productos ya existían en tu inventario:\n"
             )
+            lines.append(already_header + "\n".join(f"- {item}" for item in already_present))
         return "\n\n".join(lines)
 
     @staticmethod
@@ -2316,7 +2319,12 @@ class ChatService:
             return "Buenísimo: no tienes productos sin ubicación."
 
         lines = [f"- {product.name}: {ChatService._fmt_num(product.stock_current)} {product.unit}" for product in missing]
-        return "Estos productos están sin ubicación:\n" + "\n".join(lines)
+        missing_count = len(missing)
+        if missing_count == 1:
+            header = "Este producto está sin ubicación:\n"
+        else:
+            header = f"Estos {missing_count} productos están sin ubicación:\n"
+        return header + "\n".join(lines)
 
     @staticmethod
     def _try_products_without_stock_query(db: Session, text_n: str) -> str | None:

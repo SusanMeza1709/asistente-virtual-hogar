@@ -2156,6 +2156,35 @@ class ChatService:
         return "Estos productos están sin ubicación:\n" + "\n".join(lines)
 
     @staticmethod
+    def _try_products_without_stock_query(db: Session, text_n: str) -> str | None:
+        triggers = [
+            r"\bproductos?\s+sin\s+stock\b",
+            r"\bsin\s+stock\b",
+            r"\bproductos?\s+agotados?\b",
+            r"\bproductos?\s+(?:en\s+)?cero\b",
+            r"\bstock\s+(?:en\s+)?cero\b",
+            r"\bque\s+productos?\s+(?:no\s+tengo|me\s+faltan?)\b",
+            r"\bque\s+me\s+faltan?\b",
+        ]
+        if not any(re.search(pattern, text_n) for pattern in triggers):
+            return None
+
+        products = ProductService.list_products(db)
+        if not products:
+            return "Tu inventario está vacío por ahora."
+
+        empty = [p for p in products if (p.stock_current or 0) <= 0]
+
+        if not empty:
+            return "¡Genial! Todos tus productos tienen stock disponible."
+
+        lines = [
+            f"- {p.name}: 0 {p.unit} ({p.location or 'sin ubicación'})"
+            for p in empty
+        ]
+        return f"Estos {len(empty)} producto(s) están sin stock (cantidad = 0):\n" + "\n".join(lines)
+
+    @staticmethod
     def _current_price_key(product_id: int) -> str:
         return f"__current_price__::{product_id}"
 
@@ -2663,6 +2692,12 @@ class ChatService:
         without_location_reply = ChatService._try_products_without_location_query(db, text_i)
         if without_location_reply:
             return without_location_reply
+
+        # 18.7 Products without stock (zero stock) — must run before INVENTORY_HINTS to avoid
+        # "sin stock" matching the generic "stock" keyword in INVENTORY_HINTS
+        without_stock_reply = ChatService._try_products_without_stock_query(db, text_i)
+        if without_stock_reply:
+            return without_stock_reply
 
         # 19. Inventory list
         if ChatService._contains_any(text_i, ChatService.INVENTORY_HINTS):

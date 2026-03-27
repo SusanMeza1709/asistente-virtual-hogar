@@ -2903,6 +2903,9 @@ class ChatService:
             r"\b(?:desayuno|almuerzo|cena)\b.*\b(?:receta|recetas|cocinar|preparar)\b",
             r"\b(?:quiero|necesito|dame|sugiere)\s+.*\b(?:desayuno|almuerzo|cena)\b",
             r"\bsaludable(?:s)?\b.*\b(?:receta|recetas|desayuno|almuerzo|cena|cocinar|preparar)\b",
+            r"\b(?:quiero|necesito|dame|sugi[eé]reme)\s+algo\s+para\s+(?:desayunar|almorzar|cenar)\b",
+            r"\b(?:que|qué)\s+puedo\s+(?:desayunar|almorzar|cenar)\b",
+            r"\b(?:ideas|opciones)\s+para\s+(?:desayuno|almuerzo|cena)\b",
         )
         return any(re.search(pattern, text_n) for pattern in patterns)
 
@@ -2929,6 +2932,8 @@ class ChatService:
             "tercero": 3,
             "cuarta": 4,
             "cuarto": 4,
+            "ultima": 4,
+            "ultimo": 4,
         }
         for token, number in words.items():
             if re.search(rf"\b{token}\b", text_n):
@@ -2942,6 +2947,8 @@ class ChatService:
     @staticmethod
     def _build_breakfast_beverage_suggestion(available_all: list[str]) -> str:
         fruit_groups = [
+            ("limon", "Limonada casera"),
+            ("limón", "Limonada casera"),
             ("papaya", "Jugo de papaya"),
             ("naranja", "Jugo de naranja"),
             ("manzana", "Jugo de manzana"),
@@ -2955,6 +2962,15 @@ class ChatService:
         for ingredient_key, drink_name in fruit_groups:
             if any(ingredient_key in item for item in available_all):
                 return drink_name
+
+        if any(
+            "7 semillas" in item
+            or "siete semillas" in item
+            or "kiwicha" in item
+            or "harina de soya" in item
+            for item in available_all
+        ):
+            return "Bebida de 7 semillas en agua"
 
         if any("avena" in item or "quaker" in item for item in available_all):
             return "Avena licuada ligera"
@@ -3058,6 +3074,10 @@ class ChatService:
             "limón": ("limon", "limón"),
             "atun": ("atun", "atún"),
             "atún": ("atun", "atún"),
+            "lenteja": ("lenteja", "lentejas"),
+            "garbanzo": ("garbanzo", "garbanzos", "garganzo", "garganzos"),
+            "garganzo": ("garbanzo", "garbanzos", "garganzo", "garganzos"),
+            "7 semillas": ("7 semillas", "siete semillas", "harina 7 semillas", "harina de soya", "kiwicha"),
         }
 
         def _variants(ingredient: str) -> tuple[str, ...]:
@@ -3094,8 +3114,93 @@ class ChatService:
         requested_meals = _requested_meals(text_n)
         healthy_only = _is_healthy_requested(text_n)
 
+        def _has_any(keys: tuple[str, ...]) -> bool:
+            return any(_has_ingredient(key, available_names) for key in keys)
+
+        dynamic_recipes: list[dict] = []
+        if _has_any(("7 semillas",)):
+            dynamic_recipes.append(
+                {
+                    "name": "Bebida de 7 semillas",
+                    "meal": ("desayuno", "cena"),
+                    "healthy": True,
+                    "required": ("7 semillas",),
+                    "optional": ("agua", "canela", "miel"),
+                    "steps": (
+                        "Hierve una taza de agua.",
+                        "Disuelve 2 cucharadas de 7 semillas en polvo.",
+                        "Remueve bien y sirve tibio.",
+                    ),
+                }
+            )
+
+        if _has_any(("limon", "limón")):
+            dynamic_recipes.append(
+                {
+                    "name": "Limonada casera",
+                    "meal": ("desayuno", "almuerzo", "cena"),
+                    "healthy": True,
+                    "required": ("limon",),
+                    "optional": ("agua", "miel", "azucar"),
+                    "steps": (
+                        "Exprime 1 o 2 limones.",
+                        "Mezcla con agua fria y endulza a gusto.",
+                        "Sirve al momento.",
+                    ),
+                }
+            )
+
+        if _has_any(("pollo",)):
+            dynamic_recipes.append(
+                {
+                    "name": "Pollo a la olla",
+                    "meal": ("almuerzo", "cena"),
+                    "healthy": True,
+                    "required": ("pollo",),
+                    "optional": ("papa", "zanahoria", "cebolla", "ajo", "arroz"),
+                    "steps": (
+                        "Sella el pollo y agrega agua hasta cubrir.",
+                        "Incorpora verduras y cocina hasta que todo este suave.",
+                        "Sirve solo o acompanado con arroz.",
+                    ),
+                }
+            )
+
+        if _has_any(("arroz",)) and _has_any(("lenteja",)):
+            dynamic_recipes.append(
+                {
+                    "name": "Lentejas con arroz",
+                    "meal": ("almuerzo", "cena"),
+                    "healthy": True,
+                    "required": ("lenteja", "arroz"),
+                    "optional": ("cebolla", "ajo", "tomate", "zanahoria"),
+                    "steps": (
+                        "Cocina las lentejas con un aderezo basico.",
+                        "Prepara arroz blanco aparte.",
+                        "Sirve las lentejas junto al arroz.",
+                    ),
+                }
+            )
+
+        if _has_any(("arroz",)) and _has_any(("garbanzo", "garganzo")):
+            dynamic_recipes.append(
+                {
+                    "name": "Garbanzo con arroz",
+                    "meal": ("almuerzo", "cena"),
+                    "healthy": True,
+                    "required": ("garbanzo", "arroz"),
+                    "optional": ("cebolla", "ajo", "tomate", "comino"),
+                    "steps": (
+                        "Cocina garbanzos hasta que esten tiernos.",
+                        "Prepara un aderezo y mezcla con los garbanzos.",
+                        "Acompana con arroz cocido.",
+                    ),
+                }
+            )
+
         candidates: list[dict] = []
-        for recipe in ChatService.RECIPE_BOOK:
+        all_recipes = list(ChatService.RECIPE_BOOK) + dynamic_recipes
+        for recipe in all_recipes:
             recipe_meals = recipe.get("meal", ())
             if not any(meal in recipe_meals for meal in requested_meals):
                 continue

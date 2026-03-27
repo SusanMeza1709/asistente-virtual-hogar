@@ -1212,6 +1212,12 @@ class ChatService:
             _clear_pending_state()
             return None
 
+        # Also release stale pending state when the user starts a missing-items flow.
+        if ChatService._contains_any(text_n, ("falta", "faltan", "me falta", "nos falta", "tambien falta", "también falta")):
+            if not ChatService._contains_any(text_n, ChatService.SHOPPING_LIST_HINTS):
+                _clear_pending_state()
+                return None
+
         # Pending exists but user said something unrelated — remind them.
         pending_name = pending.get("name", "el producto")
         return (
@@ -1441,6 +1447,114 @@ class ChatService:
             return f"Listo. Eliminé {deleted_name} del inventario."
 
         return None
+
+    @staticmethod
+    def _clean_missing_line(raw_line: str) -> str:
+        line = raw_line.strip().strip("-•*\t ")
+        line = re.sub(r"^\d+[\.)-]\s*", "", line).strip()
+        line_n = ChatService._normalize(line)
+        line_n = re.sub(
+            r"^(?:falta|faltan|me\s+falta|nos\s+falta|tambien\s+falta|también\s+falta|agrega|agregar|anota|anotar|registra|registrar|crea|crear)\s+",
+            "",
+            line_n,
+        )
+        line_n = re.sub(r"\b(?:tambien|también)\s+falta$", "", line_n).strip()
+        line_n = re.sub(r"\s+(?:tambien|también)(?:\s+falta)?$", "", line_n).strip()
+        line_n = re.sub(r"^(?:el|la|los|las|un|una|unos|unas)\s+", "", line_n).strip()
+        cleaned = ChatService._clean_candidate_name(line_n)
+        return re.sub(r"\s+", " ", cleaned).strip()[:120]
+
+    @staticmethod
+    def _extract_missing_names_from_text(text: str, text_n: str) -> list[str]:
+        names: list[str] = []
+
+        if "\n" in text:
+            lines = [line for line in text.splitlines() if line.strip()]
+            for line in lines:
+                candidate = ChatService._clean_missing_line(line)
+                if candidate:
+                    names.append(candidate)
+            if len(names) >= 2:
+                return names
+            names.clear()
+
+        missing_pattern = re.search(
+            r"(?:^|\b)(?:falta|faltan|me\s+falta|nos\s+falta|tambien\s+falta|también\s+falta)\s+(?P<rest>.+)",
+            text_n,
+        )
+        if missing_pattern:
+            rest = missing_pattern.group("rest")
+            chunks = [chunk.strip() for chunk in re.split(r",|\s+y\s+", rest) if chunk.strip()]
+            for chunk in chunks:
+                candidate = ChatService._clean_missing_line(chunk)
+                if candidate:
+                    names.append(candidate)
+
+        return names
+
+    @staticmethod
+    def _register_missing_products(db: Session, names: list[str]) -> str | None:
+        if not names:
+            return None
+
+        created: list[str] = []
+        already_present: list[str] = []
+
+        for raw_name in names:
+            name = re.sub(r"\s+", " ", raw_name).strip().title()[:120]
+            if not name:
+                continue
+
+            existing = ChatService._find_product_exact(db, name)
+            if existing:
+                already_present.append(existing.name)
+                continue
+
+            inferred_unit = ChatService._infer_default_unit(name)
+            try:
+                created_product = ProductService.create_product(
+                    db,
+                    ProductCreate(
+                        name=name,
+                        category=ChatService.DEFAULT_CATEGORY,
+                        stock_current=0,
+                        unit=inferred_unit,
+                        stock_minimum=1,
+                        location=ChatService.DEFAULT_LOCATION,
+                    ),
+                )
+                created.append(created_product.name)
+            except IntegrityError:
+                db.rollback()
+                maybe_existing = ChatService._find_product_exact(db, name)
+                if maybe_existing:
+                    already_present.append(maybe_existing.name)
+
+        if not created and not already_present:
+            return None
+
+        lines: list[str] = []
+        if created:
+            lines.append(
+                "Listo. Agregué al inventario (stock en 0, para que salga en faltantes):\n"
+                + "\n".join(f"- {item}" for item in created)
+            )
+        if already_present:
+            lines.append(
+                "Estos ya existían en tu inventario:\n"
+                + "\n".join(f"- {item}" for item in already_present)
+            )
+        return "\n\n".join(lines)
+
+    @staticmethod
+    def _try_add_missing_products(db: Session, text: str, text_n: str) -> str | None:
+        if ChatService._contains_any(text_n, ChatService.SHOPPING_LIST_HINTS):
+            return None
+
+        names = ChatService._extract_missing_names_from_text(text, text_n)
+        if not names:
+            return None
+        return ChatService._register_missing_products(db, names)
 
     @staticmethod
     def _try_buy_or_consume(db: Session, text: str, text_n: str, consume: bool) -> str | None:
@@ -2157,6 +2271,11 @@ class ChatService:
         delete_product_reply = ChatService._try_delete_product(db, text_i)
         if delete_product_reply:
             return delete_product_reply
+
+        # 7.5 Missing-items flow (single phrase or multiline list)
+        missing_products_reply = ChatService._try_add_missing_products(db, text, text_i)
+        if missing_products_reply:
+            return missing_products_reply
 
         # 8. Add to / create in inventory
         add_reply = ChatService._try_add_or_create(db, text, text_i)

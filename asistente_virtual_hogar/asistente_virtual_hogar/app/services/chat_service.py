@@ -784,6 +784,11 @@ class ChatService:
         if ChatService._contains_any(text_n, total_hints):
             return True
 
+        # Common spoken pattern: "compré 6 ... a 1 sol" usually means
+        # total paid for the batch, not 1 sol per unit.
+        if qty > 1 and re.search(r"\b(?:a|por)\s+(?:un|1)\s+sol(?:es)?\b", text_n):
+            return True
+
         # Fractional quantities are almost always totals
         fractional_hint = (
             qty < 1
@@ -796,8 +801,7 @@ class ChatService:
             return True
 
         # When buying multiple whole units: treat price as total if the implied
-        # per-unit cost would be implausibly low (< 0.10 soles each).
-        # Example: "compré 6 hongos a 1 sol" → 1/6 = 0.17 → total.
+        # per-unit cost would be implausibly low.
         if qty > 1 and raw_price is not None and raw_price > 0:
             implied_unit = raw_price / qty
             if implied_unit < 0.10:

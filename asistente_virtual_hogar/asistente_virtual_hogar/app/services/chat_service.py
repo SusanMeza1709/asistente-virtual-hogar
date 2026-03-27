@@ -2964,22 +2964,29 @@ class ChatService:
 
     @staticmethod
     def _build_breakfast_beverage_suggestion(available_all: list[str]) -> str:
-        fruit_groups = [
-            ("limon", "Limonada casera"),
-            ("limón", "Limonada casera"),
-            ("papaya", "Jugo de papaya"),
-            ("naranja", "Jugo de naranja"),
-            ("manzana", "Jugo de manzana"),
-            ("platano", "Batido de platano"),
-            ("banana", "Batido de banana"),
-            ("fresa", "Jugo de fresa"),
-            ("piña", "Jugo de pina"),
-            ("pina", "Jugo de pina"),
-        ]
+        options: list[str] = []
 
-        for ingredient_key, drink_name in fruit_groups:
-            if any(ingredient_key in item for item in available_all):
-                return drink_name
+        def _add_option(name: str) -> None:
+            if name not in options:
+                options.append(name)
+
+        if any("fresa" in item for item in available_all):
+            if any("leche" in item for item in available_all):
+                _add_option("Batido de fresa con leche")
+            _add_option("Jugo de fresa")
+
+        if any("papaya" in item for item in available_all):
+            _add_option("Jugo de papaya")
+        if any("naranja" in item for item in available_all):
+            _add_option("Jugo de naranja")
+        if any("manzana" in item for item in available_all):
+            _add_option("Jugo de manzana")
+        if any("platano" in item or "banana" in item for item in available_all):
+            _add_option("Batido de banana")
+        if any("pina" in item or "piña" in item for item in available_all):
+            _add_option("Jugo de pina")
+        if any("limon" in item or "limón" in item for item in available_all):
+            _add_option("Limonada casera")
 
         if any(
             "7 semillas" in item
@@ -2988,12 +2995,21 @@ class ChatService:
             or "harina de soya" in item
             for item in available_all
         ):
-            return "Bebida de 7 semillas en agua"
+            _add_option("Bebida de 7 semillas en agua")
 
         if any("avena" in item or "quaker" in item for item in available_all):
-            return "Avena licuada ligera"
+            _add_option("Avena licuada ligera")
         if any("leche" in item for item in available_all):
-            return "Vaso de leche"
+            _add_option("Vaso de leche")
+
+        if any(
+            any(token in item for token in ("gaseosa", "cola", "kola", "soda", "pepsi", "coca", "inca kola", "fanta", "sprite"))
+            for item in available_all
+        ):
+            _add_option("Vaso de gaseosa fria")
+
+        if options:
+            return random.choice(options)
         return "Infusion caliente o agua con limon"
 
     @staticmethod
@@ -3569,7 +3585,7 @@ class ChatService:
             name_n = ChatService._normalize(recipe_name)
             if "combo desayuno" in name_n:
                 return "Combos"
-            if any(token in name_n for token in ("jugo", "batido", "licuado", "bebida", "limonada", "infusion", "infusion")):
+            if any(token in name_n for token in ("jugo", "batido", "licuado", "bebida", "limonada", "refresco", "gaseosa", "cola", "kola", "soda", "infusion", "infusion")):
                 return "Bebidas"
             if any(token in name_n for token in ("pan", "tostada", "sanguche", "sandwich", "sanduche")):
                 return "Panes/Sanguches"
@@ -3678,7 +3694,7 @@ class ChatService:
             """Pick lunch combos with exactly 2 elements: plato principal + bebida/acompanamiento."""
             def _is_beverage(item: dict) -> bool:
                 name_n = ChatService._normalize(str(item.get("name", "")))
-                return any(token in name_n for token in ("jugo", "batido", "licuado", "bebida", "limonada", "infusion"))
+                return any(token in name_n for token in ("jugo", "batido", "licuado", "bebida", "limonada", "refresco", "gaseosa", "cola", "kola", "soda", "infusion"))
 
             def _is_side(item: dict) -> bool:
                 name_n = ChatService._normalize(str(item.get("name", "")))
@@ -4069,7 +4085,7 @@ class ChatService:
             _add_dynamic_recipe(
                 {
                     "name": "Bebida de 7 semillas",
-                    "meal": ("desayuno", "cena"),
+                    "meal": ("desayuno", "almuerzo", "cena"),
                     "healthy": True,
                     "required": ("7 semillas",),
                     "optional": ("agua", "canela", "miel"),
@@ -4086,7 +4102,7 @@ class ChatService:
             _add_dynamic_recipe(
                 {
                     "name": "Batido de fresa con leche",
-                    "meal": ("desayuno",),
+                    "meal": ("desayuno", "almuerzo", "cena"),
                     "healthy": True,
                     "required": ("fresa", "leche"),
                     "optional": ("miel", "avena"),
@@ -4102,7 +4118,7 @@ class ChatService:
             _add_dynamic_recipe(
                 {
                     "name": "Jugo de fresa",
-                    "meal": ("desayuno",),
+                    "meal": ("desayuno", "almuerzo", "cena"),
                     "healthy": True,
                     "required": ("fresa",),
                     "optional": ("agua", "miel", "limon"),
@@ -4118,7 +4134,7 @@ class ChatService:
             _add_dynamic_recipe(
                 {
                     "name": "Jugo de papaya",
-                    "meal": ("desayuno",),
+                    "meal": ("desayuno", "almuerzo", "cena"),
                     "healthy": True,
                     "required": ("papaya",),
                     "optional": ("leche", "agua", "miel"),
@@ -4226,6 +4242,54 @@ class ChatService:
                         "Exprime 1 o 2 limones.",
                         "Mezcla con agua fria y endulza a gusto.",
                         "Sirve al momento.",
+                    ),
+                }
+            )
+
+        if _has_any(("naranja",)):
+            _add_dynamic_recipe(
+                {
+                    "name": "Jugo de naranja",
+                    "meal": ("desayuno", "almuerzo", "cena"),
+                    "healthy": True,
+                    "required": ("naranja",),
+                    "optional": ("agua", "miel"),
+                    "steps": (
+                        "Exprime 2 o 3 naranjas frescas.",
+                        "Mezcla con un poco de agua fria si deseas bajar acidez.",
+                        "Sirve al instante para mantener vitaminas.",
+                    ),
+                }
+            )
+
+        if _has_any(("manzana",)):
+            _add_dynamic_recipe(
+                {
+                    "name": "Jugo de manzana",
+                    "meal": ("desayuno", "almuerzo", "cena"),
+                    "healthy": True,
+                    "required": ("manzana",),
+                    "optional": ("agua", "limon", "miel"),
+                    "steps": (
+                        "Lava y trocea 1 manzana retirando semillas.",
+                        "Licua con agua fria hasta obtener textura ligera.",
+                        "Cuela si prefieres y sirve frio.",
+                    ),
+                }
+            )
+
+        if _has_any(("gaseosa", "cola", "kola", "soda", "pepsi", "coca", "inca kola", "fanta", "sprite")):
+            _add_dynamic_recipe(
+                {
+                    "name": "Vaso de gaseosa fria",
+                    "meal": ("desayuno", "almuerzo", "cena"),
+                    "healthy": False,
+                    "required": ("gaseosa",),
+                    "optional": ("hielo", "limon"),
+                    "steps": (
+                        "Enfria la gaseosa antes de servir.",
+                        "Sirve en vaso con hielo si tienes.",
+                        "Acompana con el plato elegido.",
                     ),
                 }
             )

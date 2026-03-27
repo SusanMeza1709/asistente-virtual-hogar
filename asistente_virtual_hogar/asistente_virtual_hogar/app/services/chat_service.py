@@ -1476,6 +1476,8 @@ class ChatService:
                 list(chosen.get("steps") or []),
                 str(chosen.get("meal", "")),
                 chosen.get("beverage_hint"),
+                chosen.get("prep_minutes"),
+                chosen.get("cost_estimate"),
             )
 
             _clear_pending_state()
@@ -2986,6 +2988,8 @@ class ChatService:
         steps: list[str],
         meal_text: str,
         beverage_hint: str | None = None,
+        prep_minutes: int | None = None,
+        cost_estimate: float | None = None,
     ) -> str:
         matched_unique = []
         seen = set()
@@ -3014,7 +3018,12 @@ class ChatService:
             seen_fridge_missing.add(key)
             fridge_missing_unique.append(ChatService._format_ingredient_name(item))
 
-        lines = [f"Receta: {recipe_name}", "Porcion: 1 persona", "", "Ingredientes:"]
+        lines = [f"Receta: {recipe_name}", "Porcion: 1 persona"]
+        if prep_minutes is not None:
+            lines.append(f"Tiempo estimado: {prep_minutes} minutos")
+        if cost_estimate is not None:
+            lines.append(f"Costo estimado: S/ {ChatService._fmt_num(cost_estimate)}")
+        lines.extend(["", "Ingredientes:"])
         if matched_unique:
             lines.extend(f"- {name}" for name in matched_unique)
         else:
@@ -3077,6 +3086,16 @@ class ChatService:
             )
             return any(re.search(pattern, user_text_n) for pattern in healthy_patterns)
 
+        def _requested_time_preference(user_text_n: str) -> str | None:
+            if re.search(r"\b(rapido|rápido|facil|fácil|al\s+toque|express)\b", user_text_n):
+                return "rapido"
+            if re.search(r"\b(elaborado|especial|tranquilo|con\s+tiempo|gourmet)\b", user_text_n):
+                return "elaborado"
+            return None
+
+        def _requested_budget_preference(user_text_n: str) -> bool:
+            return bool(re.search(r"\b(barato|economico|económico|ahorrar|ahorro|bajo\s+costo)\b", user_text_n))
+
         ingredient_aliases: dict[str, tuple[str, ...]] = {
             "avena": ("avena", "quaker"),
             "quaker": ("avena", "quaker"),
@@ -3105,6 +3124,23 @@ class ChatService:
         def _is_in_fridge(ingredient: str, fridge_items: list[str]) -> bool:
             variants = _variants(ingredient)
             return any(any(variant in name for variant in variants) for name in fridge_items)
+
+        def _is_allowed_location(raw_location: str | None) -> bool:
+            loc = ChatService._normalize(raw_location or "")
+            return any(tag in loc for tag in ("refrigerador", "refri", "nevera", "cocina"))
+
+        def _estimate_prep_minutes(recipe_data: dict) -> int:
+            explicit = recipe_data.get("prep_minutes")
+            if isinstance(explicit, int) and explicit > 0:
+                return explicit
+            name_n = ChatService._normalize(str(recipe_data.get("name", "")))
+            if any(token in name_n for token in ("sopa", "guiso", "olla", "sudado", "lentejas", "garbanzo")):
+                return 35
+            if any(token in name_n for token in ("salteado", "saltado", "chaufa", "omelette", "tortilla", "sandwich", "sanguche", "wrap")):
+                return 18
+            if any(token in name_n for token in ("jugo", "limonada", "bebida", "yogurt", "avena")):
+                return 10
+            return 25
 
         def _build_template_recipes() -> list[dict]:
             protein_options = ["pollo", "huevo", "atun", "atún", "pescado", "lenteja", "garbanzo", "garganzo"]
@@ -3191,26 +3227,35 @@ class ChatService:
             return templates
 
         products = ProductService.list_products(db)
+        available_products = [
+            product
+            for product in products
+            if product.stock_current > 0 and _is_allowed_location(product.location)
+        ]
+
         in_fridge = [
             ChatService._normalize(product.name)
-            for product in products
-            if product.stock_current > 0
-            and ChatService._normalize(product.location or "") in ("refrigerador", "refri", "nevera")
+            for product in available_products
+            if any(tag in ChatService._normalize(product.location or "") for tag in ("refrigerador", "refri", "nevera"))
         ]
 
         available_all = [
             ChatService._normalize(product.name)
-            for product in products
-            if product.stock_current > 0
+            for product in available_products
         ]
 
         available_names = available_all
 
         if not available_names:
-            return "Tu inventario está vacío. Cuando agregues productos, te sugiero recetas con lo que tengas."
+            return (
+                "No encontré ingredientes con stock ubicados en cocina o refrigerador. "
+                "Si actualizas ubicación de productos, te sugiero recetas al toque."
+            )
 
         requested_meals = _requested_meals(text_n)
         healthy_only = _is_healthy_requested(text_n)
+        time_pref = _requested_time_preference(text_n)
+        budget_pref = _requested_budget_preference(text_n)
 
         def _has_any(keys: tuple[str, ...]) -> bool:
             return any(_has_ingredient(key, available_names) for key in keys)
@@ -3331,6 +3376,41 @@ class ChatService:
                 - (missing_total * 2)
             )
 
+            prep_minutes = _estimate_prep_minutes(recipe)
+
+            if time_pref == "rapido":
+                score += max(0, 40 - prep_minutes)
+            elif time_pref == "elaborado":
+                score += prep_minutes // 2
+            else:
+                score += max(0, 30 - prep_minutes) // 2
+
+            def _ingredient_cost(ingredient: str) -> float | None:
+                variants = _variants(ingredient)
+                candidate = None
+                for product in available_products:
+                    product_name_n = ChatService._normalize(product.name)
+                    if any(variant in product_name_n for variant in variants):
+                        candidate = product
+                        break
+                if not candidate:
+                    return None
+                current_price = ChatService._get_current_price_for_product(db, candidate)
+                if current_price is not None:
+                    return float(current_price)
+                latest = PurchaseService.get_latest_purchase_for_product(db, candidate)
+                if latest and latest.unit_price is not None:
+                    return float(latest.unit_price)
+                return None
+
+            cost_parts = [c for c in (_ingredient_cost(item) for item in matched_required[:3]) if c is not None]
+            cost_estimate = round(sum(cost_parts), 2) if cost_parts else None
+
+            if cost_estimate is not None:
+                score += max(0, int(25 - cost_estimate))
+                if budget_pref:
+                    score += max(0, int(30 - cost_estimate))
+
             beverage_hint = None
             if "desayuno" in recipe_meals:
                 beverage_hint = ChatService._build_breakfast_beverage_suggestion(available_all)
@@ -3349,6 +3429,8 @@ class ChatService:
                     "missing_in_fridge": missing_in_fridge[:3],
                     "steps": list(recipe.get("steps", ())),
                     "beverage_hint": beverage_hint,
+                    "prep_minutes": prep_minutes,
+                    "cost_estimate": cost_estimate,
                 }
             )
 
@@ -3382,6 +3464,11 @@ class ChatService:
             if item.get("missing_in_fridge"):
                 fridge_text = ", ".join(item["missing_in_fridge"])
                 notes.append(f"en refri te falta: {fridge_text}")
+
+            if item.get("prep_minutes") is not None:
+                notes.append(f"{item['prep_minutes']} min")
+            if item.get("cost_estimate") is not None:
+                notes.append(f"S/ {ChatService._fmt_num(item['cost_estimate'])}")
 
             suffix = " | ".join(notes)
             lines.append(f"Receta {idx}: {item['name']} ({item['meal']}) - {suffix}")

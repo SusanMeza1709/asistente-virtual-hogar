@@ -931,7 +931,8 @@ class ChatService:
         if not changed:
             return "Todo ya estaba con unidades correctas según las reglas actuales."
 
-        header = f"Listo. Normalicé unidades en {len(changed)} producto(s)."
+        changed_count = len(changed)
+        header = f"Listo. Normalicé unidades en {changed_count} {ChatService._pluralize(changed_count, 'producto')}."
         if unchanged:
             header += f" {unchanged} ya estaban correctos."
         return header + "\n" + "\n".join(changed)
@@ -1076,6 +1077,12 @@ class ChatService:
         if float(value).is_integer():
             return str(int(value))
         return f"{value:.2f}".rstrip("0").rstrip(".")
+
+    @staticmethod
+    def _pluralize(count: int, singular: str, plural: str | None = None) -> str:
+        if count == 1:
+            return singular
+        return plural if plural is not None else f"{singular}s"
 
     @staticmethod
     def _fmt_money(value: float) -> str:
@@ -2338,7 +2345,12 @@ class ChatService:
             f"- {p.name}: 0 {p.unit} ({p.location or 'sin ubicación'})"
             for p in empty
         ]
-        return f"Estos {len(empty)} producto(s) están sin stock (cantidad = 0):\n" + "\n".join(lines)
+        empty_count = len(empty)
+        if empty_count == 1:
+            header = "Este producto está sin stock (cantidad = 0):"
+        else:
+            header = f"Estos {empty_count} productos están sin stock (cantidad = 0):"
+        return header + "\n" + "\n".join(lines)
 
     @staticmethod
     def _current_price_key(product_id: int) -> str:
@@ -2546,14 +2558,19 @@ class ChatService:
         chunks: list[str] = []
 
         if alerts.shopping_list:
-            chunks.append(f"- {len(alerts.shopping_list)} producto(s) sin stock para comprar")
+            count = len(alerts.shopping_list)
+            chunks.append(f"- {count} {ChatService._pluralize(count, 'producto')} sin stock para comprar")
 
         if alerts.expired:
-            chunks.append(f"- {len(alerts.expired)} producto(s) vencido(s)")
+            count = len(alerts.expired)
+            adjective = "vencido" if count == 1 else "vencidos"
+            chunks.append(f"- {count} {ChatService._pluralize(count, 'producto')} {adjective}")
         if alerts.expiring_soon:
-            chunks.append(f"- {len(alerts.expiring_soon)} producto(s) por vencer")
+            count = len(alerts.expiring_soon)
+            chunks.append(f"- {count} {ChatService._pluralize(count, 'producto')} por vencer")
         if alerts.low_stock:
-            chunks.append(f"- {len(alerts.low_stock)} producto(s) con stock bajo")
+            count = len(alerts.low_stock)
+            chunks.append(f"- {count} {ChatService._pluralize(count, 'producto')} con stock bajo")
         if alerts.consume_first:
             next_item = alerts.consume_first[0]
             chunks.append(
@@ -2691,8 +2708,15 @@ class ChatService:
         tomorrow_buy = shopping[0].product_name if shopping else "sin compras urgentes"
         reminder_hint = reminders[0] if reminders else "sin recordatorios pendientes"
 
+        expired_phrase = (
+            f"vence {expired_count} {ChatService._pluralize(expired_count, 'producto')}"
+            if expired_count == 1
+            else f"vencen {expired_count} {ChatService._pluralize(expired_count, 'producto')}"
+        )
+        expiring_phrase = f"hay {expiring_count} {ChatService._pluralize(expiring_count, 'producto')} por vencer"
+
         return (
-            f"Aquí va tu resumen de hoy: vencen {expired_count} producto(s), hay {expiring_count} por vencer, "
+            f"Aquí va tu resumen de hoy: {expired_phrase}, {expiring_phrase}, "
             f"faltan {missing} y para mañana te sugiero comprar {tomorrow_buy}. "
             f"Recordatorio clave: {reminder_hint}."
         )

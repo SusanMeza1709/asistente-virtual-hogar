@@ -199,6 +199,11 @@ class ChatService:
             "healthy": True,
             "required": ("huevo",),
             "optional": ("tomate", "cebolla", "espinaca", "pimiento"),
+            "steps": (
+                "Bate 2 huevos con una pizca de sal.",
+                "Saltea verduras picadas 3 minutos.",
+                "Agrega el huevo y cocina 2-3 minutos por lado.",
+            ),
         },
         {
             "name": "Avena con fruta",
@@ -206,13 +211,47 @@ class ChatService:
             "healthy": True,
             "required": ("avena",),
             "optional": ("leche", "platano", "banana", "papaya", "manzana", "fresa"),
+            "steps": (
+                "Cocina 1/3 taza de avena con agua o leche por 5 minutos.",
+                "Sirve y agrega fruta picada por encima.",
+                "Endulza ligeramente solo si lo necesitas.",
+            ),
         },
         {
-            "name": "Yogurt con fruta",
+            "name": "Yogurt con fruta y granola",
             "meal": ("desayuno", "cena"),
             "healthy": True,
             "required": ("yogurt",),
             "optional": ("papaya", "platano", "banana", "fresa", "granola"),
+            "steps": (
+                "Sirve una taza de yogurt natural.",
+                "Agrega fruta picada y 2 cucharadas de granola.",
+                "Mezcla y consume al instante.",
+            ),
+        },
+        {
+            "name": "Pan con palta y huevo",
+            "meal": ("desayuno", "cena"),
+            "healthy": True,
+            "required": ("palta", "huevo"),
+            "optional": ("pan", "tomate", "limon"),
+            "steps": (
+                "Hierve o frie 1 huevo.",
+                "Aplasta media palta con limon y sal.",
+                "Unta en pan y coloca el huevo en rodajas.",
+            ),
+        },
+        {
+            "name": "Omelette de queso y tomate",
+            "meal": ("desayuno", "cena"),
+            "healthy": True,
+            "required": ("huevo",),
+            "optional": ("queso", "tomate", "oregano"),
+            "steps": (
+                "Bate 2 huevos.",
+                "Vierte en sarten y agrega queso y tomate.",
+                "Dobla el omelette y cocina 1 minuto mas.",
+            ),
         },
         {
             "name": "Arroz con pollo y verduras",
@@ -220,6 +259,11 @@ class ChatService:
             "healthy": False,
             "required": ("arroz", "pollo"),
             "optional": ("zanahoria", "vainita", "arveja", "cebolla", "ajo"),
+            "steps": (
+                "Dora el pollo en trozos con ajo y cebolla.",
+                "Agrega verduras picadas y sofrie 3 minutos.",
+                "Incorpora arroz cocido y mezcla 2 minutos.",
+            ),
         },
         {
             "name": "Ensalada de pollo",
@@ -227,6 +271,11 @@ class ChatService:
             "healthy": True,
             "required": ("pollo",),
             "optional": ("lechuga", "tomate", "pepino", "palta", "limon"),
+            "steps": (
+                "Cocina o saltea pechuga de pollo en tiras.",
+                "Mezcla hojas verdes con tomate y pepino.",
+                "Agrega pollo, palta y adereza con limon.",
+            ),
         },
         {
             "name": "Salteado de verduras con huevo",
@@ -234,6 +283,11 @@ class ChatService:
             "healthy": True,
             "required": ("huevo",),
             "optional": ("brocoli", "zanahoria", "pimiento", "cebolla", "zapallito"),
+            "steps": (
+                "Saltea verduras en tiras con poco aceite.",
+                "Agrega huevo batido y mezcla hasta cuajar.",
+                "Rectifica sal y sirve caliente.",
+            ),
         },
         {
             "name": "Sopa de verduras",
@@ -241,13 +295,11 @@ class ChatService:
             "healthy": True,
             "required": ("zanahoria",),
             "optional": ("papa", "apio", "zapallo", "cebolla", "ajo"),
-        },
-        {
-            "name": "Sandwich de palta y huevo",
-            "meal": ("desayuno", "cena"),
-            "healthy": True,
-            "required": ("palta", "huevo"),
-            "optional": ("pan", "tomate", "queso"),
+            "steps": (
+                "Hierve agua con ajo y cebolla.",
+                "Agrega verduras picadas y cocina 15 minutos.",
+                "Ajusta sal y sirve.",
+            ),
         },
         {
             "name": "Pescado a la plancha con ensalada",
@@ -255,6 +307,35 @@ class ChatService:
             "healthy": True,
             "required": ("pescado",),
             "optional": ("lechuga", "tomate", "pepino", "limon"),
+            "steps": (
+                "Sazona el pescado con sal, pimienta y limon.",
+                "Cocina 3-4 minutos por lado a la plancha.",
+                "Acompaña con ensalada fresca.",
+            ),
+        },
+        {
+            "name": "Lentejas guisadas",
+            "meal": ("almuerzo", "cena"),
+            "healthy": True,
+            "required": ("lenteja",),
+            "optional": ("cebolla", "ajo", "zanahoria", "tomate", "arroz"),
+            "steps": (
+                "Hierve lentejas hasta que esten suaves.",
+                "Prepara aderezo con cebolla, ajo y tomate.",
+                "Mezcla todo y cocina 5 minutos mas.",
+            ),
+        },
+        {
+            "name": "Quinoa con verduras",
+            "meal": ("almuerzo", "cena"),
+            "healthy": True,
+            "required": ("quinoa",),
+            "optional": ("zanahoria", "brocoli", "pimiento", "cebolla"),
+            "steps": (
+                "Lava y cocina quinoa por 15 minutos.",
+                "Saltea verduras en cubos.",
+                "Mezcla quinoa con verduras y sirve.",
+            ),
         },
         {
             "name": "Wrap de pollo",
@@ -262,6 +343,35 @@ class ChatService:
             "healthy": False,
             "required": ("pollo",),
             "optional": ("tortilla", "lechuga", "tomate", "palta", "yogurt"),
+            "steps": (
+                "Cocina pollo deshilachado o en tiras.",
+                "Rellena tortilla con pollo y vegetales.",
+                "Enrolla y sirve con salsa de yogurt.",
+            ),
+        },
+        {
+            "name": "Pasta con atun y tomate",
+            "meal": ("almuerzo", "cena"),
+            "healthy": False,
+            "required": ("pasta",),
+            "optional": ("atun", "tomate", "cebolla", "ajo"),
+            "steps": (
+                "Cocina pasta al dente.",
+                "Saltea tomate, cebolla y ajo.",
+                "Mezcla con atun y pasta cocida.",
+            ),
+        },
+        {
+            "name": "Sanguche de pollo",
+            "meal": ("desayuno", "cena"),
+            "healthy": False,
+            "required": ("pollo", "pan"),
+            "optional": ("palta", "tomate", "lechuga", "queso"),
+            "steps": (
+                "Deshilacha pollo cocido.",
+                "Arma el sandwich con vegetales.",
+                "Tuesta ligeramente el pan y sirve.",
+            ),
         },
     )
 
@@ -1333,8 +1443,93 @@ class ChatService:
                 return None
             pending = dict(_PENDING)
 
+        action = pending.get("action")
+
+        if action == "recipe_choose":
+            if ChatService._contains_any(text_n, ChatService.DENY_HINTS):
+                _clear_pending_state()
+                return "Listo, no elegimos receta por ahora. Cuando quieras te propongo nuevas opciones."
+
+            selected_index = ChatService._extract_recipe_choice_index(text_n)
+            options = pending.get("options") or []
+
+            if selected_index is None and ChatService._contains_any(text_n, ChatService.CONFIRM_HINTS):
+                selected_index = 1
+
+            if not options:
+                _clear_pending_state()
+                return "Se perdió la lista de recetas. Pídeme recetas otra vez y te las muestro de nuevo."
+
+            if selected_index is None:
+                if ChatService._is_recipe_request(text_n):
+                    _clear_pending_state()
+                    return None
+                return "Elige una opción: receta 1, receta 2, receta 3 o receta 4."
+
+            if selected_index < 1 or selected_index > len(options):
+                return f"Solo tengo {len(options)} opciones activas. Elige receta 1 hasta receta {len(options)}."
+
+            chosen = options[selected_index - 1]
+            recipe_text = ChatService._build_recipe_detail_text(
+                chosen.get("name", "Receta"),
+                list(chosen.get("matched") or []),
+                list(chosen.get("missing") or []),
+                list(chosen.get("steps") or []),
+            )
+
+            _clear_pending_state()
+            _PENDING.update(
+                {
+                    "action": "recipe_whatsapp",
+                    "recipe_name": chosen.get("name", "Receta"),
+                    "recipe_text": recipe_text,
+                }
+            )
+
+            return (
+                recipe_text
+                + "\n\n¿Deseas que te envíe la receta completa por WhatsApp? "
+                "Responde sí o no."
+            )
+
+        if action == "recipe_whatsapp":
+            if ChatService._contains_any(text_n, ChatService.DENY_HINTS):
+                _clear_pending_state()
+                return "Perfecto, no la envío por WhatsApp. Si quieres otra receta, te doy más opciones."
+
+            is_confirmed = ChatService._contains_any(text_n, ChatService.CONFIRM_HINTS)
+            phone_in_text = ChatService._extract_phone_number(text_n)
+
+            if not is_confirmed and not phone_in_text:
+                return "Si deseas enviarla por WhatsApp, responde sí. Si no, responde no."
+
+            if phone_in_text:
+                MemoryService.save_item(db, MemoryCreate(key=ChatService.WHATSAPP_TO_KEY, value=phone_in_text))
+
+            target_phone = phone_in_text or ChatService._get_default_whatsapp_to(db)
+            if not target_phone:
+                return (
+                    "Para enviarte la receta por WhatsApp necesito tu número. "
+                    "Dímelo así: mi número de WhatsApp es 926342398."
+                )
+
+            recipe_text = str(pending.get("recipe_text", "")).strip() or "Aquí va tu receta completa."
+            sent, detail = WhatsAppService.send_message(recipe_text, target_phone)
+            _clear_pending_state()
+
+            if sent:
+                return f"Listo, te envié la receta completa por WhatsApp a +{target_phone}."
+
+            encoded = quote(recipe_text)
+            return (
+                "No pude enviarla automáticamente por WhatsApp todavía. "
+                f"Detalle: {detail}\n"
+                "Te dejo el link manual:\n"
+                f"https://wa.me/{target_phone}?text={encoded}"
+            )
+
         if ChatService._contains_any(text_n, ChatService.CONFIRM_HINTS):
-            if pending.get("action") == "create_product":
+            if action == "create_product":
                 name = str(pending.get("name", "")).strip().title()
                 if not name:
                     _clear_pending_state()
@@ -1451,6 +1646,11 @@ class ChatService:
                 return None
 
         # Pending exists but user said something unrelated — remind them.
+        if action == "recipe_choose":
+            return "Antes de seguir, elige una opción: receta 1, receta 2, receta 3 o receta 4."
+        if action == "recipe_whatsapp":
+            return "Antes de seguir, confirma si te la envío por WhatsApp. Responde sí o no."
+
         pending_name = pending.get("name", "el producto")
         return (
             f"Antes de seguir: ¿quieres que cree {pending_name} en el inventario? "
@@ -2689,7 +2889,99 @@ class ChatService:
         return "Te sugiero consumir primero:\n" + "\n".join(lines)
 
     @staticmethod
+    def _is_recipe_request(text_n: str) -> bool:
+        if ChatService._contains_any(text_n, ChatService.RECIPE_HINTS):
+            return True
+
+        patterns = (
+            r"\breceta(?:s)?\b",
+            r"\brecomiend(?:a|ame|ame|ar)\s+.*\bcomer\b",
+            r"\b(?:que|que|qué)\s+(?:puedo|podria|podria|podr[ií]a)\s+(?:cocinar|preparar|comer)\b",
+            r"\b(?:que|qué)\s+hago\s+de\s+comer\b",
+            r"\b(?:desayuno|almuerzo|cena)\b.*\b(?:receta|recetas|cocinar|preparar)\b",
+            r"\b(?:quiero|necesito|dame|sugiere)\s+.*\b(?:desayuno|almuerzo|cena)\b",
+            r"\bsaludable(?:s)?\b.*\b(?:receta|recetas|desayuno|almuerzo|cena|cocinar|preparar)\b",
+        )
+        return any(re.search(pattern, text_n) for pattern in patterns)
+
+    @staticmethod
+    def _extract_recipe_choice_index(text_n: str) -> int | None:
+        match = re.search(r"\b(?:receta\s*)?(1|2|3|4)\b", text_n)
+        if match:
+            return int(match.group(1))
+
+        words = {
+            "uno": 1,
+            "una": 1,
+            "dos": 2,
+            "tres": 3,
+            "cuatro": 4,
+            "primera": 1,
+            "primero": 1,
+            "segunda": 2,
+            "segundo": 2,
+            "tercera": 3,
+            "tercero": 3,
+            "cuarta": 4,
+            "cuarto": 4,
+        }
+        for token, number in words.items():
+            if re.search(rf"\b{token}\b", text_n):
+                return number
+        return None
+
+    @staticmethod
+    def _format_ingredient_name(name: str) -> str:
+        return str(name).strip().replace("_", " ")
+
+    @staticmethod
+    def _build_recipe_detail_text(recipe_name: str, matched: list[str], missing: list[str], steps: list[str]) -> str:
+        matched_unique = []
+        seen = set()
+        for item in matched:
+            key = ChatService._normalize(item)
+            if key in seen:
+                continue
+            seen.add(key)
+            matched_unique.append(ChatService._format_ingredient_name(item))
+
+        missing_unique = []
+        seen_missing = set()
+        for item in missing:
+            key = ChatService._normalize(item)
+            if key in seen_missing:
+                continue
+            seen_missing.add(key)
+            missing_unique.append(ChatService._format_ingredient_name(item))
+
+        lines = [f"Receta: {recipe_name}", "Porcion: 1 persona", "", "Ingredientes:"]
+        if matched_unique:
+            lines.extend(f"- {name}" for name in matched_unique)
+        else:
+            lines.append("- Revisa los ingredientes base de la receta")
+
+        if missing_unique:
+            lines.append("")
+            lines.append("Te faltaria comprar:")
+            lines.extend(f"- {name}" for name in missing_unique)
+
+        lines.append("")
+        lines.append("Preparacion:")
+        if steps:
+            lines.extend(f"{idx}. {step}" for idx, step in enumerate(steps, start=1))
+        else:
+            lines.append("1. Cocina los ingredientes principales.")
+            lines.append("2. Integra los complementos y ajusta sazon.")
+            lines.append("3. Sirve caliente o fresco segun corresponda.")
+
+        lines.append("")
+        lines.append("Nota mascota: evita darle cebolla, ajo, uvas o chocolate.")
+        return "\n".join(lines)
+
+    @staticmethod
     def _build_recipes_reply(db: Session, text_n: str) -> str:
+        global _PENDING
+
         def _requested_meals(user_text_n: str) -> list[str]:
             requested: list[str] = []
             if re.search(r"\bdesayuno\b", user_text_n):
@@ -2710,6 +3002,8 @@ class ChatService:
                 r"\bligera\b",
                 r"\bdieta\b",
                 r"\bfitness\b",
+                r"\bfit\b",
+                r"\bbalancead[oa]s?\b",
                 r"\bbajo\s+en\s+grasa\b",
             )
             return any(re.search(pattern, user_text_n) for pattern in healthy_patterns)
@@ -2736,8 +3030,11 @@ class ChatService:
         requested_meals = _requested_meals(text_n)
         healthy_only = _is_healthy_requested(text_n)
 
-        suggestions_by_meal: dict[str, list[dict]] = {"desayuno": [], "almuerzo": [], "cena": []}
+        candidates: list[dict] = []
         for recipe in ChatService.RECIPE_BOOK:
+            recipe_meals = recipe.get("meal", ())
+            if not any(meal in recipe_meals for meal in requested_meals):
+                continue
             if healthy_only and not recipe.get("healthy"):
                 continue
 
@@ -2747,51 +3044,62 @@ class ChatService:
             matched_required = [ingredient for ingredient in required if _has_ingredient(ingredient, available_names)]
             missing_required = [ingredient for ingredient in required if ingredient not in matched_required]
             matched_optional = [ingredient for ingredient in optional if _has_ingredient(ingredient, available_names)]
+            missing_optional = [ingredient for ingredient in optional if ingredient not in matched_optional]
 
-            # Allow recommendations when only a few ingredients are missing.
-            near_complete = len(missing_required) <= 2 and (len(matched_required) > 0 or len(matched_optional) >= 2)
-            if not near_complete:
+            missing_total = len(missing_required) + len(missing_optional)
+            is_complete = len(missing_required) == 0
+            near_complete = len(missing_required) <= 1 and missing_total <= 3
+
+            if not is_complete and not near_complete:
                 continue
 
-            score = (len(matched_required) * 3) + len(matched_optional) - (len(missing_required) * 2)
-            payload = {
-                "name": recipe["name"],
-                "score": score,
-                "missing": missing_required,
-                "matched": matched_required + matched_optional,
-            }
+            score = (50 if is_complete else 0) + (len(matched_required) * 12) + (len(matched_optional) * 3) - (missing_total * 2)
+            candidates.append(
+                {
+                    "name": recipe["name"],
+                    "meal": ", ".join(recipe_meals),
+                    "is_complete": is_complete,
+                    "score": score,
+                    "matched": matched_required + matched_optional,
+                    "missing": missing_required + missing_optional[:2],
+                    "steps": list(recipe.get("steps", ())),
+                }
+            )
 
-            for meal in recipe.get("meal", ()): 
-                if meal in suggestions_by_meal:
-                    suggestions_by_meal[meal].append(payload)
+        candidates.sort(key=lambda item: (item["is_complete"], item["score"]), reverse=True)
+        options = candidates[:4]
 
-        selected_sections: list[str] = []
-        for meal in requested_meals:
-            options = sorted(suggestions_by_meal.get(meal, []), key=lambda item: item["score"], reverse=True)
-            if not options:
-                continue
-
-            lines: list[str] = []
-            for item in options[:3]:
-                if item["missing"]:
-                    missing_text = ", ".join(item["missing"])
-                    lines.append(f"- {item['name']} (te faltaría: {missing_text})")
-                else:
-                    lines.append(f"- {item['name']} (la puedes preparar hoy)")
-
-            section_title = meal.capitalize()
-            selected_sections.append(f"{section_title}:\n" + "\n".join(lines))
-
-        if not selected_sections:
+        if not options:
             healthy_note = " saludables" if healthy_only else ""
             return (
                 f"Con lo que hay en la refri aún no detecto recetas{healthy_note} claras de mi lista. "
-                "Si agregas 1 o 2 ingredientes más, te doy opciones concretas por comida."
+                "Si agregas 1 o 2 ingredientes más, te doy nuevas opciones."
             )
 
+        _PENDING.clear()
+        _PENDING.update(
+            {
+                "action": "recipe_choose",
+                "options": options,
+            }
+        )
+
+        lines = []
+        for idx, item in enumerate(options, start=1):
+            if item["missing"]:
+                missing_text = ", ".join(item["missing"])
+                suffix = f"te faltaria: {missing_text}"
+            else:
+                suffix = "completa con lo que tienes"
+            lines.append(f"Receta {idx}: {item['name']} ({item['meal']}) - {suffix}")
+
         healthy_header = " saludables" if healthy_only else ""
-        fridge_note = " (priorizando lo que tienes en la refri)" if in_fridge else ""
-        return f"Recetas{healthy_header} sugeridas{fridge_note}:\n" + "\n\n".join(selected_sections)
+        fridge_note = " (priorizando tu refri)" if in_fridge else ""
+        return (
+            f"Te propongo estas recetas{healthy_header}{fridge_note}, priorizando las completas:\n"
+            + "\n".join(lines)
+            + "\n\nDime cuál deseas: receta 1, receta 2, receta 3 o receta 4."
+        )
 
     @staticmethod
     def _list_household_reminders(db: Session) -> list[str]:
@@ -2877,27 +3185,31 @@ class ChatService:
         text_n = ChatService._normalize(text)
         text_i = ChatService._canonicalize_intent_text(text_n)
 
-        # 0. WhatsApp destination preference
-        whatsapp_number_reply = ChatService._try_set_whatsapp_number(db, text_i)
-        if whatsapp_number_reply:
-            return whatsapp_number_reply
-
-        # 1. Locale preference
-        locale_reply = ChatService._maybe_update_locale(db, text_i)
-        if locale_reply:
-            return locale_reply
-
-        # 2. Conversational tone preference
-        tone_reply = ChatService._maybe_update_tone(db, text_i)
-        if tone_reply:
-            return tone_reply
-
-        # 2. Pending confirmation takes priority
+        # 0. Pending confirmation takes priority
         pending_reply = ChatService._try_pending_confirmation(db, text_i)
         if pending_reply:
             return pending_reply
 
-        # 3. Social / conversational
+        # 1. WhatsApp destination preference
+        whatsapp_number_reply = ChatService._try_set_whatsapp_number(db, text_i)
+        if whatsapp_number_reply:
+            return whatsapp_number_reply
+
+        # 2. Locale preference
+        locale_reply = ChatService._maybe_update_locale(db, text_i)
+        if locale_reply:
+            return locale_reply
+
+        # 3. Conversational tone preference
+        tone_reply = ChatService._maybe_update_tone(db, text_i)
+        if tone_reply:
+            return tone_reply
+
+        # 3.5 Recipes (early routing so greetings do not swallow recipe requests)
+        if ChatService._is_recipe_request(text_i):
+            return ChatService._build_recipes_reply(db, text_i)
+
+        # 4. Social / conversational
         social_reply = ChatService._try_social_reply(db, text_i)
         if social_reply:
             return social_reply
@@ -2950,10 +3262,6 @@ class ChatService:
         # 9. Daily summary
         if ChatService._contains_any(text_i, ChatService.DAILY_SUMMARY_HINTS):
             return ChatService._build_daily_summary_reply(db)
-
-        # 10. Recipes
-        if ChatService._contains_any(text_i, ChatService.RECIPE_HINTS):
-            return ChatService._build_recipes_reply(db, text_i)
 
         # 11. Household reminders list
         if ChatService._contains_any(text_i, ChatService.HOUSEHOLD_REMINDER_HINTS):

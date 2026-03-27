@@ -1131,7 +1131,9 @@ class ChatService:
         for product in products:
             if ChatService._normalize(product.name) == normalized_target:
                 return product
-        return None
+        # Fallback to flexible matching so voice artifacts like "cebolla en"
+        # can still be found when the user later says just "cebolla".
+        return ChatService._find_product_flexible(db, raw_name)
 
     # ------------------------------------------------------------------
     # Pending-confirmation handler
@@ -1698,7 +1700,7 @@ class ChatService:
             )
             reduced = re.sub(r"\b\d+\s*/\s*\d+\b", " ", reduced)
             reduced = re.sub(r"\b\d+(?:[.,]\d+)?\b", " ", reduced)
-            reduced = re.sub(r"\b(?:un|uno|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|medio|media|cuartos?|kilo|kilos|kg|gramo|gramos|g|tarro|tarros|unidad|unidades|docena|docenas|litro|litros|el|la|los|las|sol|soles|centimo|centimos|con|y|cincuenta|veinte|treinta|cuarenta|sesenta|setenta|ochenta|noventa)\b", " ", reduced)
+            reduced = re.sub(r"\b(?:un|uno|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|medio|media|cuartos?|kilo|kilos|kg|gramo|gramos|g|tarro|tarros|unidad|unidades|docena|docenas|litro|litros|el|la|los|las|sol|soles|centimo|centimos|con|y|en|cincuenta|veinte|treinta|cuarenta|sesenta|setenta|ochenta|noventa)\b", " ", reduced)
             name = ChatService._clean_candidate_name(reduced)
             if not name:
                 if consume:

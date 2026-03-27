@@ -193,11 +193,76 @@ class ChatService:
     )
 
     RECIPE_BOOK = (
-        {"name": "Tortilla de huevo", "ingredients": ("huevo",)},
-        {"name": "Avena con leche", "ingredients": ("avena", "leche")},
-        {"name": "Yogurt con fruta", "ingredients": ("yogurt", "papaya", "platano", "banana", "fresa")},
-        {"name": "Arroz con huevo", "ingredients": ("arroz", "huevo")},
-        {"name": "Batido de papaya", "ingredients": ("papaya", "leche")},
+        {
+            "name": "Tortilla de verduras",
+            "meal": ("desayuno", "cena"),
+            "healthy": True,
+            "required": ("huevo",),
+            "optional": ("tomate", "cebolla", "espinaca", "pimiento"),
+        },
+        {
+            "name": "Avena con fruta",
+            "meal": ("desayuno",),
+            "healthy": True,
+            "required": ("avena",),
+            "optional": ("leche", "platano", "banana", "papaya", "manzana", "fresa"),
+        },
+        {
+            "name": "Yogurt con fruta",
+            "meal": ("desayuno", "cena"),
+            "healthy": True,
+            "required": ("yogurt",),
+            "optional": ("papaya", "platano", "banana", "fresa", "granola"),
+        },
+        {
+            "name": "Arroz con pollo y verduras",
+            "meal": ("almuerzo", "cena"),
+            "healthy": False,
+            "required": ("arroz", "pollo"),
+            "optional": ("zanahoria", "vainita", "arveja", "cebolla", "ajo"),
+        },
+        {
+            "name": "Ensalada de pollo",
+            "meal": ("almuerzo", "cena"),
+            "healthy": True,
+            "required": ("pollo",),
+            "optional": ("lechuga", "tomate", "pepino", "palta", "limon"),
+        },
+        {
+            "name": "Salteado de verduras con huevo",
+            "meal": ("almuerzo", "cena"),
+            "healthy": True,
+            "required": ("huevo",),
+            "optional": ("brocoli", "zanahoria", "pimiento", "cebolla", "zapallito"),
+        },
+        {
+            "name": "Sopa de verduras",
+            "meal": ("almuerzo", "cena"),
+            "healthy": True,
+            "required": ("zanahoria",),
+            "optional": ("papa", "apio", "zapallo", "cebolla", "ajo"),
+        },
+        {
+            "name": "Sandwich de palta y huevo",
+            "meal": ("desayuno", "cena"),
+            "healthy": True,
+            "required": ("palta", "huevo"),
+            "optional": ("pan", "tomate", "queso"),
+        },
+        {
+            "name": "Pescado a la plancha con ensalada",
+            "meal": ("almuerzo", "cena"),
+            "healthy": True,
+            "required": ("pescado",),
+            "optional": ("lechuga", "tomate", "pepino", "limon"),
+        },
+        {
+            "name": "Wrap de pollo",
+            "meal": ("almuerzo", "cena"),
+            "healthy": False,
+            "required": ("pollo",),
+            "optional": ("tortilla", "lechuga", "tomate", "palta", "yogurt"),
+        },
     )
 
     DEFAULT_UNIT_BY_KEYWORD = {
@@ -2624,32 +2689,109 @@ class ChatService:
         return "Te sugiero consumir primero:\n" + "\n".join(lines)
 
     @staticmethod
-    def _build_recipes_reply(db: Session) -> str:
+    def _build_recipes_reply(db: Session, text_n: str) -> str:
+        def _requested_meals(user_text_n: str) -> list[str]:
+            requested: list[str] = []
+            if re.search(r"\bdesayuno\b", user_text_n):
+                requested.append("desayuno")
+            if re.search(r"\balmuerzo\b", user_text_n):
+                requested.append("almuerzo")
+            if re.search(r"\bcena\b", user_text_n):
+                requested.append("cena")
+            return requested or ["desayuno", "almuerzo", "cena"]
+
+        def _is_healthy_requested(user_text_n: str) -> bool:
+            healthy_patterns = (
+                r"\bsaludable\b",
+                r"\bsaludables\b",
+                r"\bsano\b",
+                r"\bsana\b",
+                r"\bligero\b",
+                r"\bligera\b",
+                r"\bdieta\b",
+                r"\bfitness\b",
+                r"\bbajo\s+en\s+grasa\b",
+            )
+            return any(re.search(pattern, user_text_n) for pattern in healthy_patterns)
+
+        def _has_ingredient(ingredient: str, available: list[str]) -> bool:
+            return any(ingredient in name for name in available)
+
         products = ProductService.list_products(db)
-        available_names = [ChatService._normalize(product.name) for product in products if product.stock_current > 0]
+        in_fridge = [
+            ChatService._normalize(product.name)
+            for product in products
+            if product.stock_current > 0
+            and ChatService._normalize(product.location or "") in ("refrigerador", "refri", "nevera")
+        ]
+        available_names = in_fridge or [
+            ChatService._normalize(product.name)
+            for product in products
+            if product.stock_current > 0
+        ]
+
         if not available_names:
             return "Tu inventario está vacío. Cuando agregues productos, te sugiero recetas con lo que tengas."
 
-        suggestions: list[str] = []
+        requested_meals = _requested_meals(text_n)
+        healthy_only = _is_healthy_requested(text_n)
+
+        suggestions_by_meal: dict[str, list[dict]] = {"desayuno": [], "almuerzo": [], "cena": []}
         for recipe in ChatService.RECIPE_BOOK:
-            matched = []
-            for ingredient in recipe["ingredients"]:
-                if any(ingredient in product_name for product_name in available_names):
-                    matched.append(ingredient)
+            if healthy_only and not recipe.get("healthy"):
+                continue
 
-            ingredients_count = len(recipe["ingredients"])
-            min_required = 1 if ingredients_count == 1 else 2
-            if len(set(matched)) >= min_required:
-                suggestions.append(recipe["name"])
+            required = list(recipe.get("required", ()))
+            optional = list(recipe.get("optional", ()))
 
-        if not suggestions:
+            matched_required = [ingredient for ingredient in required if _has_ingredient(ingredient, available_names)]
+            missing_required = [ingredient for ingredient in required if ingredient not in matched_required]
+            matched_optional = [ingredient for ingredient in optional if _has_ingredient(ingredient, available_names)]
+
+            # Allow recommendations when only a few ingredients are missing.
+            near_complete = len(missing_required) <= 2 and (len(matched_required) > 0 or len(matched_optional) >= 2)
+            if not near_complete:
+                continue
+
+            score = (len(matched_required) * 3) + len(matched_optional) - (len(missing_required) * 2)
+            payload = {
+                "name": recipe["name"],
+                "score": score,
+                "missing": missing_required,
+                "matched": matched_required + matched_optional,
+            }
+
+            for meal in recipe.get("meal", ()): 
+                if meal in suggestions_by_meal:
+                    suggestions_by_meal[meal].append(payload)
+
+        selected_sections: list[str] = []
+        for meal in requested_meals:
+            options = sorted(suggestions_by_meal.get(meal, []), key=lambda item: item["score"], reverse=True)
+            if not options:
+                continue
+
+            lines: list[str] = []
+            for item in options[:3]:
+                if item["missing"]:
+                    missing_text = ", ".join(item["missing"])
+                    lines.append(f"- {item['name']} (te faltaría: {missing_text})")
+                else:
+                    lines.append(f"- {item['name']} (la puedes preparar hoy)")
+
+            section_title = meal.capitalize()
+            selected_sections.append(f"{section_title}:\n" + "\n".join(lines))
+
+        if not selected_sections:
+            healthy_note = " saludables" if healthy_only else ""
             return (
-                "Con lo que hay en la refri aún no detecto una receta clara de mi lista. "
-                "Si agregas más ingredientes, te sugiero opciones concretas."
+                f"Con lo que hay en la refri aún no detecto recetas{healthy_note} claras de mi lista. "
+                "Si agregas 1 o 2 ingredientes más, te doy opciones concretas por comida."
             )
 
-        lines = [f"- {name}" for name in suggestions[:5]]
-        return "Con lo que hay en la refri puedes cocinar:\n" + "\n".join(lines)
+        healthy_header = " saludables" if healthy_only else ""
+        fridge_note = " (priorizando lo que tienes en la refri)" if in_fridge else ""
+        return f"Recetas{healthy_header} sugeridas{fridge_note}:\n" + "\n\n".join(selected_sections)
 
     @staticmethod
     def _list_household_reminders(db: Session) -> list[str]:
@@ -2811,7 +2953,7 @@ class ChatService:
 
         # 10. Recipes
         if ChatService._contains_any(text_i, ChatService.RECIPE_HINTS):
-            return ChatService._build_recipes_reply(db)
+            return ChatService._build_recipes_reply(db, text_i)
 
         # 11. Household reminders list
         if ChatService._contains_any(text_i, ChatService.HOUSEHOLD_REMINDER_HINTS):

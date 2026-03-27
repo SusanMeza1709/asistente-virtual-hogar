@@ -1372,13 +1372,19 @@ class ChatService:
         if not normalized_target:
             return None
 
+        exact_variants = {normalized_target}
+        # Accept light singular/plural variations without enabling fuzzy matches.
+        if len(normalized_target) > 3 and normalized_target.endswith("s"):
+            exact_variants.add(normalized_target[:-1])
+        if len(normalized_target) > 4 and normalized_target.endswith("es"):
+            exact_variants.add(normalized_target[:-2])
+
         products = ProductService.list_products(db)
         for product in products:
-            if ChatService._normalize(product.name) == normalized_target:
+            key = ChatService._normalize(product.name)
+            if key in exact_variants:
                 return product
-        # Fallback to flexible matching so voice artifacts like "cebolla en"
-        # can still be found when the user later says just "cebolla".
-        return ChatService._find_product_flexible(db, raw_name)
+        return None
 
     @staticmethod
     def _find_product_with_unit_preference(db: Session, raw_name: str, preferred_unit: str | None):
@@ -1388,14 +1394,19 @@ class ChatService:
         if not normalized_target or not pref:
             return ChatService._find_product_exact(db, raw_name)
 
+        exact_variants = {normalized_target}
+        if len(normalized_target) > 3 and normalized_target.endswith("s"):
+            exact_variants.add(normalized_target[:-1])
+        if len(normalized_target) > 4 and normalized_target.endswith("es"):
+            exact_variants.add(normalized_target[:-2])
+
         products = ProductService.list_products(db)
         candidates = []
         for product in products:
             key = ChatService._normalize(product.name)
             if not key:
                 continue
-            # Avoid over-generic reverse containment like "te" in "detergente".
-            if normalized_target == key or normalized_target in key:
+            if key in exact_variants:
                 candidates.append(product)
 
         if not candidates:
@@ -1485,6 +1496,7 @@ class ChatService:
                 chosen.get("name", "Receta"),
                 list(chosen.get("matched") or []),
                 list(chosen.get("missing") or []),
+                list(chosen.get("optional_missing") or []),
                 list(chosen.get("missing_in_fridge") or []),
                 list(chosen.get("steps") or []),
                 str(chosen.get("meal", "")),
@@ -3017,6 +3029,7 @@ class ChatService:
         recipe_name: str,
         matched: list[str],
         missing: list[str],
+        optional_missing: list[str],
         missing_in_fridge: list[str],
         steps: list[str],
         meal_text: str,
@@ -3044,6 +3057,15 @@ class ChatService:
             seen_missing.add(key)
             missing_unique.append(ChatService._format_ingredient_name(item))
 
+        optional_unique = []
+        seen_optional = set()
+        for item in optional_missing:
+            key = ChatService._normalize(item)
+            if key in seen_optional:
+                continue
+            seen_optional.add(key)
+            optional_unique.append(ChatService._format_ingredient_name(item))
+
         fridge_missing_unique = []
         seen_fridge_missing = set()
         for item in missing_in_fridge:
@@ -3068,6 +3090,11 @@ class ChatService:
             lines.append("")
             lines.append("Te faltaria comprar:")
             lines.extend(f"- {name}" for name in missing_unique)
+
+        if optional_unique:
+            lines.append("")
+            lines.append("Opcionales si deseas mejorar la receta:")
+            lines.extend(f"- {name}" for name in optional_unique)
 
         if fridge_missing_unique:
             lines.append("")
@@ -3208,8 +3235,46 @@ class ChatService:
         if cleaned_steps:
             avg_words = sum(len(step.split()) for step in cleaned_steps) / max(1, len(cleaned_steps))
             vague_count = sum(1 for step in cleaned_steps if _is_vague(step))
-            if len(cleaned_steps) >= 5 and avg_words >= 8 and vague_count <= 1:
+            time_or_heat_hits = sum(
+                1
+                for step in cleaned_steps
+                if re.search(r"\b\d+\s*(?:min|mins|minuto|minutos)\b|\bfuego\b|\bhervor\b|\bdorar\b", ChatService._normalize(step))
+            )
+            # Keep existing steps only when they are already detailed enough.
+            if len(cleaned_steps) >= 6 and avg_words >= 9 and vague_count <= 1 and time_or_heat_hits >= 3:
                 return cleaned_steps
+
+            expanded_steps: list[str] = []
+            for index, step in enumerate(cleaned_steps[:8], start=1):
+                step_clean = step.rstrip(".")
+                has_time = bool(re.search(r"\b\d+\s*(?:min|mins|minuto|minutos)\b", ChatService._normalize(step_clean)))
+                has_heat = bool(re.search(r"\bfuego\b|\bhervor\b|\bdorar\b", ChatService._normalize(step_clean)))
+
+                if index == 1:
+                    suffix = "a fuego medio por 2 a 3 minutos, mezclando de forma constante"
+                elif index <= 3:
+                    suffix = "por 4 a 6 minutos a fuego medio, hasta integrar sabores"
+                elif index <= 5:
+                    suffix = "a fuego medio-bajo por 5 minutos, controlando textura y humedad"
+                else:
+                    suffix = "durante 2 a 3 minutos finales, probando sal y punto de coccion"
+
+                if has_time and has_heat:
+                    expanded_steps.append(f"{step_clean}.")
+                elif has_time or has_heat:
+                    expanded_steps.append(f"{step_clean}, {suffix}.")
+                else:
+                    expanded_steps.append(f"{step_clean} {suffix}.")
+
+            if len(expanded_steps) < 6:
+                expanded_steps.append(
+                    "Si necesita liquido, agrega 2 a 4 cucharadas de agua caliente y cocina 2 minutos a fuego bajo para estabilizar la salsa."
+                )
+            if len(expanded_steps) < 7:
+                expanded_steps.append(
+                    "Apaga, deja reposar 2 minutos, rectifica sal y sirve caliente para conservar aroma y textura."
+                )
+            return expanded_steps
 
         recipe_n = ChatService._normalize(recipe_name)
         ingredient_text = ", ".join(ingredients[:6]) if ingredients else "tus ingredientes disponibles"
@@ -3469,76 +3534,179 @@ class ChatService:
             if last_shown
             else ""
         )
-        ingredients_text = ", ".join(available_ingredients[:35])
-
-        prompt = (
-            f"Tengo estos ingredientes en casa: {ingredients_text}.\n"
-            f"Genera exactamente 4 recetas peruanas COMPLETAS para {meals_text}.{healthy_clause}"
-            f"{avoid_clause}\n"
-            "REGLAS ESTRICTAS:\n"
-            "- Usa SOLO los ingredientes que te di, no agregues nada que no esté en la lista.\n"
-            "- Cada receta debe poder prepararse completamente con lo que hay disponible.\n"
-            "- Genera recetas variadas (distintos tipos de platos).\n"
-            "- La preparación debe ser detallada: entre 6 y 8 pasos, sin frases ambiguas.\n"
-            "- Cada paso debe incluir acción concreta + tiempo aproximado + nivel de fuego o textura objetivo.\n"
-            "- Incluye cantidades aproximadas para 1 persona dentro de los pasos cuando aplique.\n"
-            "Responde ÚNICAMENTE con un JSON válido, sin texto adicional:\n"
-            '{"recetas": [{"nombre": "...", "tipo_comida": "almuerzo", '
-            '"ingredientes": ["ingrediente1"], "pasos": ["Paso 1 detallado...", "Paso 2 detallado..."], '
-            '"tiempo_minutos": 25}]}'
-        )
-
-        url = (
-            "https://generativelanguage.googleapis.com/v1beta/models/"
-            f"gemini-2.0-flash:generateContent?key={api_key}"
-        )
-        payload = {
-            "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {"temperature": 0.85, "maxOutputTokens": 1800},
+        ingredients_text = ", ".join(available_ingredients[:40])
+        available_norm = [ChatService._normalize(item) for item in available_ingredients if str(item).strip()]
+        available_set = {item for item in available_norm if item}
+        staple_whitelist = {
+            "agua",
+            "sal",
+            "pimienta",
+            "aceite",
+            "oregano",
+            "orégano",
+            "comino",
+            "ajo",
+            "cebolla",
+            "limon",
+            "limón",
         }
 
-        try:
-            with httpx.Client(timeout=12.0) as client:
-                resp = client.post(url, json=payload)
-            if resp.status_code != 200:
-                return None
-            data = resp.json()
-            raw_text = data["candidates"][0]["content"]["parts"][0]["text"]
-            # Strip markdown code fences if Gemini wraps the JSON
-            raw_text = re.sub(r"^```(?:json)?\s*", "", raw_text.strip())
-            raw_text = re.sub(r"\s*```$", "", raw_text.strip())
-            parsed = _json.loads(raw_text)
-        except Exception:
-            return None
+        def _ingredient_is_available(raw_ingredient: str) -> bool:
+            ing = ChatService._normalize(raw_ingredient)
+            if not ing:
+                return False
+            if ing in available_set or ing in staple_whitelist:
+                return True
+            for available in available_set:
+                if len(ing) <= 4:
+                    if re.search(rf"\b{re.escape(ing)}\b", available):
+                        return True
+                elif ing in available or available in ing:
+                    return True
+            return False
 
-        result: list[dict] = []
-        for r in (parsed.get("recetas") or [])[:4]:
-            name = str(r.get("nombre", "")).strip()
-            meal_raw = str(r.get("tipo_comida", "almuerzo")).strip().lower()
+        def _build_prompt(repair_mode: bool = False) -> str:
+            extra = ""
+            if repair_mode:
+                extra = (
+                    " MODO REPARACION: si una receta usa ingrediente no disponible o pasos ambiguos, reemplazala por otra valida."
+                )
+            return (
+                f"Tengo estos ingredientes en casa: {ingredients_text}.\n"
+                f"Genera exactamente 4 recetas peruanas COMPLETAS para {meals_text}.{healthy_clause}"
+                f"{avoid_clause}{extra}\n"
+                "REGLAS ESTRICTAS:\n"
+                "- Usa SOLO los ingredientes que te di; no inventes ingredientes fuera de lista.\n"
+                "- Cada receta debe poder prepararse completamente con lo disponible.\n"
+                "- Genera recetas variadas (distintos tipos de platos).\n"
+                "- Preparacion obligatoria de 6 a 8 pasos concretos, sin ambiguedad.\n"
+                "- En al menos 4 pasos, incluye tiempo (minutos) y fuego/textura objetivo.\n"
+                "- Incluye cantidades aproximadas para 1 persona cuando aplique.\n"
+                "Responde SOLO JSON válido:\n"
+                '{"recetas": [{"nombre": "...", "tipo_comida": "almuerzo", '
+                '"ingredientes": ["ingrediente1"], "pasos": ["Paso 1..."], "tiempo_minutos": 25}]}'
+            )
+
+        def _request_json(prompt_text: str, temperature: float) -> dict | None:
+            url = (
+                "https://generativelanguage.googleapis.com/v1beta/models/"
+                f"gemini-2.0-flash:generateContent?key={api_key}"
+            )
+            payload = {
+                "contents": [{"parts": [{"text": prompt_text}]}],
+                "generationConfig": {"temperature": temperature, "maxOutputTokens": 1800},
+            }
+            try:
+                with httpx.Client(timeout=12.0) as client:
+                    resp = client.post(url, json=payload)
+                if resp.status_code != 200:
+                    return None
+                data = resp.json()
+                raw_text = data["candidates"][0]["content"]["parts"][0]["text"]
+                raw_text = re.sub(r"^```(?:json)?\s*", "", raw_text.strip())
+                raw_text = re.sub(r"\s*```$", "", raw_text.strip())
+                try:
+                    return _json.loads(raw_text)
+                except Exception:
+                    json_match = re.search(r"\{[\s\S]*\}", raw_text)
+                    if not json_match:
+                        return None
+                    return _json.loads(json_match.group(0))
+            except Exception:
+                return None
+
+        def _sanitize_recipe(raw_recipe: dict) -> dict | None:
+            name = str(raw_recipe.get("nombre", "")).strip()
+            meal_raw = ChatService._normalize(str(raw_recipe.get("tipo_comida", "almuerzo")).strip())
             meal_tuple: tuple[str, ...] = (
                 (meal_raw,) if meal_raw in ("desayuno", "almuerzo", "cena") else ("almuerzo", "cena")
             )
-            ingredients_used = [str(i).strip().lower() for i in (r.get("ingredientes") or []) if i]
-            steps = [str(s).strip() for s in (r.get("pasos") or []) if s]
-            minutes = int(r.get("tiempo_minutos") or 25)
-            if not name or not ingredients_used:
-                continue
-            result.append(
-                {
-                    "name": name,
-                    "meal": ", ".join(meal_tuple),
-                    "is_complete": True,
-                    "score": 100,
-                    "matched": ingredients_used,
-                    "missing": [],
-                    "missing_in_fridge": [],
-                    "steps": steps,
-                    "beverage_hint": None,
-                    "prep_minutes": minutes,
-                    "cost_estimate": None,
-                    "source": "gemini",
-                }
+
+            raw_ingredients = [str(item).strip() for item in (raw_recipe.get("ingredientes") or []) if str(item).strip()]
+            if not name or not raw_ingredients:
+                return None
+
+            matched: list[str] = []
+            missing: list[str] = []
+            seen_ing = set()
+            for ingredient in raw_ingredients:
+                ing_n = ChatService._normalize(ingredient)
+                if not ing_n or ing_n in seen_ing:
+                    continue
+                seen_ing.add(ing_n)
+                if _ingredient_is_available(ingredient):
+                    matched.append(ing_n)
+                else:
+                    missing.append(ing_n)
+
+            # Reject Gemini outputs that invent unavailable ingredients.
+            if not matched or missing:
+                return None
+
+            raw_steps = [str(step).strip() for step in (raw_recipe.get("pasos") or []) if str(step).strip()]
+            steps = ChatService._ensure_detailed_recipe_steps(name, matched, raw_steps)
+            if len(steps) < 6:
+                return None
+
+            detail_hits = sum(
+                1
+                for step in steps
+                if re.search(r"\b\d+\s*(?:min|mins|minuto|minutos)\b|\bfuego\b|\bhervor\b|\bdorar\b", ChatService._normalize(step))
             )
+            if detail_hits < 3:
+                return None
+
+            try:
+                minutes = int(raw_recipe.get("tiempo_minutos") or 25)
+            except Exception:
+                minutes = 25
+            minutes = max(8, min(minutes, 120))
+
+            return {
+                "name": name,
+                "meal": ", ".join(meal_tuple),
+                "is_complete": True,
+                "score": 100,
+                "matched": matched,
+                "missing": [],
+                "optional_missing": [],
+                "missing_in_fridge": [],
+                "steps": steps,
+                "beverage_hint": None,
+                "prep_minutes": minutes,
+                "cost_estimate": None,
+                "source": "gemini",
+            }
+
+        # Attempt 1: diverse generation. Attempt 2: repair mode for stricter correction.
+        attempts = [
+            (_build_prompt(repair_mode=False), 0.85),
+            (_build_prompt(repair_mode=True), 0.35),
+        ]
+
+        result: list[dict] = []
+        seen_names: set[str] = set()
+
+        for prompt_text, temperature in attempts:
+            parsed = _request_json(prompt_text, temperature)
+            if not parsed:
+                continue
+
+            for raw_recipe in (parsed.get("recetas") or [])[:6]:
+                if not isinstance(raw_recipe, dict):
+                    continue
+                candidate = _sanitize_recipe(raw_recipe)
+                if not candidate:
+                    continue
+
+                key = ChatService._normalize(str(candidate.get("name", "")))
+                if not key or key in seen_names:
+                    continue
+                seen_names.add(key)
+                result.append(candidate)
+                if len(result) >= 4:
+                    return result
+
         return result or None
 
     @staticmethod
@@ -3604,6 +3772,69 @@ class ChatService:
                 merged.append(str(raw))
             return merged
 
+        def _collapse_inventory_compounds(items: list[str], available: list[str]) -> list[str]:
+            """Merge split item names into compound inventory products when possible.
+            Example: if inventory has 'hongos laurel' and output has 'hongos' + 'laurel',
+            replace both with 'hongos laurel'.
+            """
+            if not items:
+                return []
+
+            normalized_items = _merge_unique_items(items)
+            token_stopwords = {"de", "del", "la", "el", "los", "las", "con", "y"}
+
+            # Build compound candidates from current stock names (2+ meaningful words).
+            compounds: list[tuple[str, list[str]]] = []
+            seen_compounds = set()
+            for raw_name in available:
+                compound_name = ChatService._normalize(str(raw_name))
+                if not compound_name or compound_name in seen_compounds:
+                    continue
+                tokens = [t for t in compound_name.split() if t not in token_stopwords]
+                if len(tokens) < 2:
+                    continue
+                seen_compounds.add(compound_name)
+                compounds.append((compound_name, tokens))
+
+            # Prefer longer compounds first.
+            compounds.sort(key=lambda item: len(item[1]), reverse=True)
+
+            current = list(normalized_items)
+
+            def _item_contains_token(item_n: str, token: str) -> bool:
+                return re.search(rf"\b{re.escape(token)}\b", item_n) is not None
+
+            for compound_name, tokens in compounds:
+                if any(ChatService._normalize(entry) == compound_name for entry in current):
+                    continue
+
+                matched_indexes: list[int] = []
+                used_indexes = set()
+                for token in tokens:
+                    found_index = None
+                    for idx, raw_item in enumerate(current):
+                        if idx in used_indexes:
+                            continue
+                        item_n = ChatService._normalize(raw_item)
+                        if _item_contains_token(item_n, token):
+                            found_index = idx
+                            break
+                    if found_index is None:
+                        matched_indexes = []
+                        break
+                    used_indexes.add(found_index)
+                    matched_indexes.append(found_index)
+
+                if not matched_indexes:
+                    continue
+
+                # Remove split parts and add compound label.
+                for idx in sorted(matched_indexes, reverse=True):
+                    current.pop(idx)
+                current.append(compound_name)
+
+            return _merge_unique_items(current)
+
         def _build_breakfast_combo_options(pool: list[dict], max_options: int = 4) -> list[dict]:
             beverages = [item for item in pool if _breakfast_block_label(str(item.get("name", ""))) == "Bebidas"]
             companions = [
@@ -3652,6 +3883,8 @@ class ChatService:
                 c_matched = list(companion.get("matched") or [])
                 b_missing = list(beverage.get("missing") or [])
                 c_missing = list(companion.get("missing") or [])
+                b_missing_optional = list(beverage.get("optional_missing") or [])
+                c_missing_optional = list(companion.get("optional_missing") or [])
                 b_missing_fridge = list(beverage.get("missing_in_fridge") or [])
                 c_missing_fridge = list(companion.get("missing_in_fridge") or [])
                 b_cond_ok = list(beverage.get("condiments_available") or [])
@@ -3677,6 +3910,7 @@ class ChatService:
                         "score": int(beverage.get("score", 0)) + int(companion.get("score", 0)) + 20,
                         "matched": _merge_unique_items(b_matched + c_matched),
                         "missing": _merge_unique_items(b_missing + c_missing),
+                        "optional_missing": _merge_unique_items(b_missing_optional + c_missing_optional),
                         "missing_in_fridge": _merge_unique_items(b_missing_fridge + c_missing_fridge),
                         "steps": combo_steps,
                         "beverage_hint": b_name,
@@ -3744,6 +3978,8 @@ class ChatService:
                 p_matched = list(partner.get("matched") or [])
                 m_missing = list(main.get("missing") or [])
                 p_missing = list(partner.get("missing") or [])
+                m_missing_optional = list(main.get("optional_missing") or [])
+                p_missing_optional = list(partner.get("optional_missing") or [])
                 m_missing_fridge = list(main.get("missing_in_fridge") or [])
                 p_missing_fridge = list(partner.get("missing_in_fridge") or [])
                 m_cond_ok = list(main.get("condiments_available") or [])
@@ -3769,6 +4005,7 @@ class ChatService:
                         "score": int(main.get("score", 0)) + int(partner.get("score", 0)) + 20,
                         "matched": _merge_unique_items(m_matched + p_matched),
                         "missing": _merge_unique_items(m_missing + p_missing),
+                        "optional_missing": _merge_unique_items(m_missing_optional + p_missing_optional),
                         "missing_in_fridge": _merge_unique_items(m_missing_fridge + p_missing_fridge),
                         "steps": combo_steps,
                         "beverage_hint": p_name if _breakfast_block_label(p_name) == "Bebidas" else None,
@@ -3843,6 +4080,13 @@ class ChatService:
             "7 semillas": ("7 semillas", "siete semillas", "harina 7 semillas", "harina de soya", "kiwicha"),
             "sillao": ("sillao", "soya", "salsa de soya"),
             "ajinomoto": ("ajinomoto",),
+            "hongos laurel": (
+                "hongos laurel",
+                "hongo laurel",
+                "laurel hongos",
+                "salsa de hongos laurel",
+                "salsa hongos laurel",
+            ),
             "hongos": ("hongos", "salsa de hongos"),
             "laurel": ("laurel", "hoja de laurel", "hojas de laurel"),
             "mayonesa": ("mayonesa",),
@@ -4369,6 +4613,8 @@ class ChatService:
                 seen_missing.add(key)
                 missing_all.append(item)
 
+            missing_all = _collapse_inventory_compounds(missing_all, available_names)
+
             lines = [f"Para preparar {requested_recipe.get('name', 'esa receta')} te comparto el listado completo:", ""]
             lines.append("Te falta comprar:")
             if missing_all:
@@ -4422,6 +4668,13 @@ class ChatService:
             missing_optional = [ingredient for ingredient in optional if ingredient not in matched_optional]
             condiments_available = [ingredient for ingredient in condiments if _has_ingredient(ingredient, available_names)]
             condiments_missing = [ingredient for ingredient in condiments if ingredient not in condiments_available]
+
+            matched_required = _collapse_inventory_compounds(matched_required, available_names)
+            matched_optional = _collapse_inventory_compounds(matched_optional, available_names)
+            missing_required = _collapse_inventory_compounds(missing_required, available_names)
+            missing_optional = _collapse_inventory_compounds(missing_optional, available_names)
+            condiments_available = _collapse_inventory_compounds(condiments_available, available_names)
+            condiments_missing = _collapse_inventory_compounds(condiments_missing, available_names)
 
             fridge_hits = sum(1 for ingredient in (matched_required + matched_optional) if _is_in_fridge(ingredient, in_fridge))
 
@@ -4501,7 +4754,11 @@ class ChatService:
                     "is_complete": is_complete,
                     "score": score,
                     "matched": matched_required + matched_optional,
-                    "missing": missing_required + missing_optional[:2],
+                    # Show only required missing items as real purchase needs.
+                    # Optional ingredients are useful suggestions but should not
+                    # appear as blockers in "Te faltaria comprar".
+                    "missing": missing_required,
+                    "optional_missing": missing_optional,
                     "missing_in_fridge": missing_in_fridge[:3],
                     "steps": list(recipe.get("steps", ())),
                     "beverage_hint": beverage_hint,

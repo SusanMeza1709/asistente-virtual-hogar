@@ -784,9 +784,12 @@ class ChatService:
         if ChatService._contains_any(text_n, total_hints):
             return True
 
-        # Common spoken pattern: "compré 6 ... a 1 sol" usually means
-        # total paid for the batch, not 1 sol per unit.
-        if qty > 1 and re.search(r"\b(?:a|por)\s+(?:un|1)\s+sol(?:es)?\b", text_n):
+        # For whole-quantity purchases, default to lot total when user says
+        # "compré N ... a X soles" without explicit per-unit wording.
+        if qty > 1 and re.search(
+            r"\b(?:a|por|costo|cost[óo]|me\s+costo|me\s+cost[óo])\s+(?:s\/|s\.)?\s*(?:\d+(?:[.,]\d+)?|un\s+sol|\d+\s+sol(?:es)?(?:\s+con\s+\d{1,2}(?:\s+centimos?)?)?|\d+\s+sol(?:es)?\s+\d{1,2}(?:\s+centimos?)?|(?:dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce|trece|catorce|quince|veinte)\s+sol(?:es)?)\b",
+            text_n,
+        ):
             return True
 
         # Fractional quantities are almost always totals

@@ -1475,6 +1475,8 @@ class ChatService:
                 list(chosen.get("matched") or []),
                 list(chosen.get("missing") or []),
                 list(chosen.get("steps") or []),
+                str(chosen.get("meal", "")),
+                chosen.get("beverage_hint"),
             )
 
             _clear_pending_state()
@@ -2906,9 +2908,12 @@ class ChatService:
 
     @staticmethod
     def _extract_recipe_choice_index(text_n: str) -> int | None:
-        match = re.search(r"\b(?:receta\s*)?(1|2|3|4)\b", text_n)
+        match = re.search(r"\b(?:receta|opcion|opción)?\s*(1|2|3|4)\b", text_n)
         if match:
             return int(match.group(1))
+
+        if re.search(r"\b(?:la\s+)?(?:opcion|opción|numero|número)\s+(1|2|3|4)\b", text_n):
+            return int(re.search(r"\b(1|2|3|4)\b", text_n).group(1))
 
         words = {
             "uno": 1,
@@ -2935,7 +2940,37 @@ class ChatService:
         return str(name).strip().replace("_", " ")
 
     @staticmethod
-    def _build_recipe_detail_text(recipe_name: str, matched: list[str], missing: list[str], steps: list[str]) -> str:
+    def _build_breakfast_beverage_suggestion(available_all: list[str]) -> str:
+        fruit_groups = [
+            ("papaya", "Jugo de papaya"),
+            ("naranja", "Jugo de naranja"),
+            ("manzana", "Jugo de manzana"),
+            ("platano", "Batido de platano"),
+            ("banana", "Batido de banana"),
+            ("fresa", "Jugo de fresa"),
+            ("piña", "Jugo de pina"),
+            ("pina", "Jugo de pina"),
+        ]
+
+        for ingredient_key, drink_name in fruit_groups:
+            if any(ingredient_key in item for item in available_all):
+                return drink_name
+
+        if any("avena" in item or "quaker" in item for item in available_all):
+            return "Avena licuada ligera"
+        if any("leche" in item for item in available_all):
+            return "Vaso de leche"
+        return "Infusion caliente o agua con limon"
+
+    @staticmethod
+    def _build_recipe_detail_text(
+        recipe_name: str,
+        matched: list[str],
+        missing: list[str],
+        steps: list[str],
+        meal_text: str,
+        beverage_hint: str | None = None,
+    ) -> str:
         matched_unique = []
         seen = set()
         for item in matched:
@@ -2974,6 +3009,10 @@ class ChatService:
             lines.append("2. Integra los complementos y ajusta sazon.")
             lines.append("3. Sirve caliente o fresco segun corresponda.")
 
+        if "desayuno" in ChatService._normalize(meal_text) and beverage_hint:
+            lines.append("")
+            lines.append(f"Bebida sugerida: {beverage_hint}.")
+
         lines.append("")
         lines.append("Nota mascota: evita darle cebolla, ajo, uvas o chocolate.")
         return "\n".join(lines)
@@ -3008,8 +3047,30 @@ class ChatService:
             )
             return any(re.search(pattern, user_text_n) for pattern in healthy_patterns)
 
+        ingredient_aliases: dict[str, tuple[str, ...]] = {
+            "avena": ("avena", "quaker"),
+            "quaker": ("avena", "quaker"),
+            "platano": ("platano", "banana"),
+            "banana": ("platano", "banana"),
+            "pina": ("pina", "piña"),
+            "piña": ("pina", "piña"),
+            "limon": ("limon", "limón"),
+            "limón": ("limon", "limón"),
+            "atun": ("atun", "atún"),
+            "atún": ("atun", "atún"),
+        }
+
+        def _variants(ingredient: str) -> tuple[str, ...]:
+            key = ChatService._normalize(ingredient)
+            return ingredient_aliases.get(key, (key,))
+
         def _has_ingredient(ingredient: str, available: list[str]) -> bool:
-            return any(ingredient in name for name in available)
+            variants = _variants(ingredient)
+            return any(any(variant in name for variant in variants) for name in available)
+
+        def _is_in_fridge(ingredient: str, fridge_items: list[str]) -> bool:
+            variants = _variants(ingredient)
+            return any(any(variant in name for variant in variants) for name in fridge_items)
 
         products = ProductService.list_products(db)
         in_fridge = [
@@ -3018,11 +3079,14 @@ class ChatService:
             if product.stock_current > 0
             and ChatService._normalize(product.location or "") in ("refrigerador", "refri", "nevera")
         ]
-        available_names = in_fridge or [
+
+        available_all = [
             ChatService._normalize(product.name)
             for product in products
             if product.stock_current > 0
         ]
+
+        available_names = available_all
 
         if not available_names:
             return "Tu inventario está vacío. Cuando agregues productos, te sugiero recetas con lo que tengas."
@@ -3046,6 +3110,8 @@ class ChatService:
             matched_optional = [ingredient for ingredient in optional if _has_ingredient(ingredient, available_names)]
             missing_optional = [ingredient for ingredient in optional if ingredient not in matched_optional]
 
+            fridge_hits = sum(1 for ingredient in (matched_required + matched_optional) if _is_in_fridge(ingredient, in_fridge))
+
             missing_total = len(missing_required) + len(missing_optional)
             is_complete = len(missing_required) == 0
             near_complete = len(missing_required) <= 1 and missing_total <= 3
@@ -3053,7 +3119,18 @@ class ChatService:
             if not is_complete and not near_complete:
                 continue
 
-            score = (50 if is_complete else 0) + (len(matched_required) * 12) + (len(matched_optional) * 3) - (missing_total * 2)
+            score = (
+                (50 if is_complete else 0)
+                + (len(matched_required) * 12)
+                + (len(matched_optional) * 3)
+                + (fridge_hits * 2)
+                - (missing_total * 2)
+            )
+
+            beverage_hint = None
+            if "desayuno" in recipe_meals:
+                beverage_hint = ChatService._build_breakfast_beverage_suggestion(available_all)
+
             candidates.append(
                 {
                     "name": recipe["name"],
@@ -3063,6 +3140,7 @@ class ChatService:
                     "matched": matched_required + matched_optional,
                     "missing": missing_required + missing_optional[:2],
                     "steps": list(recipe.get("steps", ())),
+                    "beverage_hint": beverage_hint,
                 }
             )
 

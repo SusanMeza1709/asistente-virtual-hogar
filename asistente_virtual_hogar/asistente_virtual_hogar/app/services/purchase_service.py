@@ -84,19 +84,11 @@ class PurchaseService:
         """
         Set price without changing stock.
 
-        Returns (purchase_record, created_reference_record):
-        - created_reference_record=False when latest purchase was updated.
-        - created_reference_record=True when no purchases existed and a
-          reference purchase row (quantity=0) was created.
-        """
-        latest = PurchaseService.get_latest_purchase_for_product(db, product)
-        if latest:
-            latest.unit_price = unit_price
-            db.add(latest)
-            db.flush()
-            db.refresh(latest)
-            return latest, False
+        Returns (purchase_record, created_reference_record).
 
+        To preserve historical prices, this always creates a reference
+        purchase row with quantity=0 and the provided unit price.
+        """
         reference = Purchase(
             product_id=product.id,
             quantity=0,

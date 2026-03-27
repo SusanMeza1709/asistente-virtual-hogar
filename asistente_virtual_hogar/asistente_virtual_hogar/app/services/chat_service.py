@@ -1966,6 +1966,8 @@ class ChatService:
         patterns = [
             r"(?:actualiza|actualizar|pon|poner|cambia|cambiar|registra|registrar)\s+(?:el\s+)?precio\s+(?:de|del|para)\s+(?P<name>.+?)\s+(?:a|por|en)\s+(?P<price>.+)",
             r"precio\s+(?:de|del)\s+(?P<name>.+?)\s+(?:es|seria|sería)\s+(?P<price>.+)",
+            # Reference price without buy intent, e.g. "1 detergente opal a 8 soles"
+            r"^(?P<qty>\d+(?:[.,]\d+)?)\s+(?P<name>.+?)\s+(?:a|por)\s+(?P<price>.+)$",
         ]
 
         parsed_name: str | None = None
@@ -1975,6 +1977,15 @@ class ChatService:
             match = re.search(pattern, text_n)
             if not match:
                 continue
+
+            # For free-form "qty + name + precio" pattern, avoid hijacking
+            # explicit buy/consume messages.
+            if match.groupdict().get("qty") is not None:
+                if ChatService._contains_any(text_n, ChatService.ACTION_BUY) or ChatService._contains_any(text_n, ChatService.ACTION_CONSUME):
+                    return None
+                if re.search(r"\bme\s+cost[óo]\b", text_n):
+                    return None
+
             name_raw = match.group("name")
             price_raw = match.group("price")
             name = ChatService._clean_candidate_name(name_raw).title()

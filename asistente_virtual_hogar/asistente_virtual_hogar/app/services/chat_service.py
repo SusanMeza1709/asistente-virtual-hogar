@@ -3056,8 +3056,9 @@ class ChatService:
 
         lines.append("")
         lines.append("Preparacion:")
-        if steps:
-            lines.extend(f"{idx}. {step}" for idx, step in enumerate(steps, start=1))
+        detailed_steps = ChatService._ensure_detailed_recipe_steps(recipe_name, matched_unique, steps)
+        if detailed_steps:
+            lines.extend(f"{idx}. {step}" for idx, step in enumerate(detailed_steps, start=1))
         else:
             lines.append("1. Cocina los ingredientes principales.")
             lines.append("2. Integra los complementos y ajusta sazon.")
@@ -3070,6 +3071,84 @@ class ChatService:
         lines.append("")
         lines.append("Nota mascota: evita darle cebolla, ajo, uvas o chocolate.")
         return "\n".join(lines)
+
+    @staticmethod
+    def _ensure_detailed_recipe_steps(recipe_name: str, ingredients: list[str], steps: list[str]) -> list[str]:
+        cleaned_steps = [str(step).strip() for step in (steps or []) if str(step).strip()]
+
+        def _is_vague(text: str) -> bool:
+            text_n = ChatService._normalize(text)
+            vague_phrases = (
+                "cocina por separado",
+                "mezcla todo",
+                "ajusta sabor",
+                "sirve al momento",
+                "saltea las verduras",
+            )
+            return any(phrase in text_n for phrase in vague_phrases)
+
+        if cleaned_steps:
+            avg_words = sum(len(step.split()) for step in cleaned_steps) / max(1, len(cleaned_steps))
+            vague_count = sum(1 for step in cleaned_steps if _is_vague(step))
+            if len(cleaned_steps) >= 5 and avg_words >= 8 and vague_count <= 1:
+                return cleaned_steps
+
+        ingredient_text = ", ".join(ingredients[:6]) if ingredients else "tus ingredientes disponibles"
+        ingredient_n = [ChatService._normalize(item) for item in ingredients]
+        has_legume = any(any(token in name for token in ("garban", "garganz", "lentej", "frijol")) for name in ingredient_n)
+        has_potato = any("papa" in name for name in ingredient_n)
+        has_onion = any("cebolla" in name for name in ingredient_n)
+        has_garlic = any("ajo" in name for name in ingredient_n)
+        has_lemon = any("limon" in name for name in ingredient_n)
+
+        detailed = [
+            f"Alista la mise en place para 1 persona: separa {ingredient_text}, lava y desinfecta todo, y pica fino lo que vaya en aderezo.",
+        ]
+
+        if has_legume:
+            detailed.append(
+                "Si el grano está crudo y seco, déjalo en remojo de 8 a 12 horas; luego enjuágalo y cocínalo en agua limpia entre 35 y 50 minutos, hasta que quede suave al morder."
+            )
+            detailed.append(
+                "Si ya está cocido, enjuágalo y resérvalo para integrarlo al final y evitar que se deshaga."
+            )
+
+        aderezo_parts = []
+        if has_onion:
+            aderezo_parts.append("cebolla")
+        if has_garlic:
+            aderezo_parts.append("ajo")
+        if aderezo_parts:
+            detailed.append(
+                f"En una sartén, calienta 1 cucharada de aceite a fuego medio y sofríe {', '.join(aderezo_parts)} de 4 a 6 minutos, moviendo, hasta que tome color dorado y aroma intenso."
+            )
+        else:
+            detailed.append(
+                "En una sartén, calienta 1 cucharada de aceite a fuego medio y prepara una base aromática con los ingredientes disponibles durante 3 a 5 minutos."
+            )
+
+        if has_potato:
+            detailed.append(
+                "Agrega la papa en cubos medianos, incorpora un chorrito de agua (o caldo si tienes), tapa y cocina de 12 a 15 minutos a fuego medio-bajo hasta que esté tierna sin romperse."
+            )
+
+        detailed.append(
+            "Integra la proteína o legumbre principal, sazona con sal al gusto y cocina 5 a 8 minutos más para que los sabores se junten; si se seca, añade 2 o 3 cucharadas de agua."
+        )
+
+        if has_lemon:
+            detailed.append(
+                "Apaga el fuego y termina con unas gotas de limón para levantar el sabor; prueba y corrige sal antes de servir."
+            )
+        else:
+            detailed.append(
+                "Apaga el fuego, deja reposar 2 minutos y ajusta el punto de sal antes de servir."
+            )
+
+        detailed.append(
+            "Sirve caliente en porción individual y, si queda para después, enfría y guarda en recipiente tapado dentro de 2 horas para conservar textura y seguridad."
+        )
+        return detailed
 
     @staticmethod
     def _get_weekly_recipe_history(db: Session) -> list[dict]:
@@ -3229,9 +3308,12 @@ class ChatService:
             "- Usa SOLO los ingredientes que te di, no agregues nada que no esté en la lista.\n"
             "- Cada receta debe poder prepararse completamente con lo que hay disponible.\n"
             "- Genera recetas variadas (distintos tipos de platos).\n"
+            "- La preparación debe ser detallada: entre 6 y 8 pasos, sin frases ambiguas.\n"
+            "- Cada paso debe incluir acción concreta + tiempo aproximado + nivel de fuego o textura objetivo.\n"
+            "- Incluye cantidades aproximadas para 1 persona dentro de los pasos cuando aplique.\n"
             "Responde ÚNICAMENTE con un JSON válido, sin texto adicional:\n"
             '{"recetas": [{"nombre": "...", "tipo_comida": "almuerzo", '
-            '"ingredientes": ["ingrediente1"], "pasos": ["Paso 1...", "Paso 2..."], '
+            '"ingredientes": ["ingrediente1"], "pasos": ["Paso 1 detallado...", "Paso 2 detallado..."], '
             '"tiempo_minutos": 25}]}'
         )
 

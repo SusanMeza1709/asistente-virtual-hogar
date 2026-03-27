@@ -1261,15 +1261,13 @@ class ChatService:
 
     @staticmethod
     def _fmt_money(value: float) -> str:
-        amount = round(float(value), 2)
+        # Display money rounded to nearest 10 centimos for natural voice/text output.
+        amount = round(round(float(value) * 10) / 10, 2)
         if amount < 0:
             return f"menos {ChatService._fmt_money(abs(amount))}"
 
         if amount < 1:
-            # For small amounts use 10-cent rounding and preserve leading zero.
-            rounded_subsol = round(amount * 10) / 10
-            cents_rounded = int(round(rounded_subsol * 100))
-            return f"{rounded_subsol:.2f} céntimos"
+            return f"{amount:.2f} céntimos"
 
         cents_total = int(round(amount * 100))
 
@@ -3113,6 +3111,27 @@ class ChatService:
             carb_options = ["arroz", "quinoa", "pasta", "fideo", "avena", "quaker", "papa"]
             veg_options = ["zanahoria", "tomate", "cebolla", "pepino", "lechuga", "vainita", "brocoli", "pimiento", "palta"]
 
+            def _peruvian_template_name(protein: str, carb: str, has_veggies: bool) -> str:
+                p = ChatService._format_ingredient_name(protein)
+                c = ChatService._format_ingredient_name(carb)
+                n_protein = ChatService._normalize(protein)
+                n_carb = ChatService._normalize(carb)
+
+                if n_protein in ("lenteja", "garbanzo", "garganzo") and n_carb == "arroz":
+                    return f"Guiso de {p} con arroz"
+                if n_protein == "pescado" and n_carb == "arroz":
+                    return "Sudado de pescado con arroz"
+                if n_protein == "pollo" and n_carb == "arroz":
+                    return "Arroz con pollo casero"
+                if n_protein == "huevo" and n_carb == "arroz":
+                    return "Chaufa saludable de huevo"
+                if n_carb in ("arroz", "quinoa"):
+                    suffix = " y verduras" if has_veggies else ""
+                    return f"Saltado de {p} con {c}{suffix}"
+                if n_carb in ("fideo", "pasta"):
+                    return f"Salteado de {p} con {c}"
+                return f"Guiso casero de {p} con {c}"
+
             proteins = [item for item in protein_options if _has_ingredient(item, available_names)]
             carbs = [item for item in carb_options if _has_ingredient(item, available_names)]
             veggies = [item for item in veg_options if _has_ingredient(item, available_names)]
@@ -3123,8 +3142,7 @@ class ChatService:
             for protein in proteins:
                 for carb in carbs:
                     veg_slice = veggies[:3] if veggies else []
-                    veg_label = " y verduras" if veg_slice else ""
-                    name = f"Bowl de {ChatService._format_ingredient_name(protein)} con {ChatService._format_ingredient_name(carb)}{veg_label}"
+                    name = _peruvian_template_name(protein, carb, bool(veg_slice))
                     norm_name = ChatService._normalize(name)
                     if norm_name in generated_names:
                         continue

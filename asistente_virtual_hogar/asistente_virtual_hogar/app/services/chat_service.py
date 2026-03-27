@@ -1653,6 +1653,13 @@ class ChatService:
                 " ",
                 reduced,
             )
+            # Remove trailing piece-count clauses from the product candidate.
+            # Example: "camote, vienen 4" -> "camote"
+            reduced = re.sub(
+                r"[,;:]?\s*\b(?:vienen?|traen?|son|hay|tiene[n]?|trae)\s+\d+\b.*$",
+                " ",
+                reduced,
+            )
             reduced = re.sub(r"\b\d+\s*/\s*\d+\b", " ", reduced)
             reduced = re.sub(r"\b\d+(?:[.,]\d+)?\b", " ", reduced)
             reduced = re.sub(r"\b(?:un|uno|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|medio|media|cuarto|kilo|kilos|kg|gramo|gramos|g|tarro|tarros|unidad|unidades|docena|docenas|litro|litros|el|la|los|las|sol|soles|centimo|centimos|con|y)\b", " ", reduced)
@@ -1669,6 +1676,19 @@ class ChatService:
         if not product:
             inferred_unit = ChatService._infer_default_unit(name)
             qty_for_default_unit = ChatService._convert_qty_between_units(qty, input_unit, inferred_unit)
+            if (
+                qty_for_default_unit is None
+                and not consume
+                and ChatService._is_weight_unit(input_unit)
+                and inferred_unit == "unidad"
+            ):
+                piece_count = ChatService._extract_unit_count_from_purchase(text_n)
+                if piece_count:
+                    if unit_price is not None and unit_price > 0:
+                        total_paid = unit_price * qty
+                        unit_price = round(total_paid / piece_count, 4)
+                    qty_for_default_unit = float(piece_count)
+                    input_unit = "unidad"
             if qty_for_default_unit is None:
                 return (
                     f"No pude convertir {ChatService._fmt_num(qty)} {input_unit or ''} a la unidad de {name}. "

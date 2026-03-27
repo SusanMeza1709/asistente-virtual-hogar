@@ -1953,12 +1953,12 @@ class ChatService:
             if product.unit == "kilo":
                 half_kilo = ChatService._fmt_num(latest.unit_price * 0.5)
                 return (
-                    f"El último precio registrado de {product.name} es {ChatService._fmt_num(latest.unit_price)} por kilo "
-                    f"(equivale a {half_kilo} por 1/2 kilo)."
+                    f"El último precio registrado de {product.name} es {ChatService._fmt_num(latest.unit_price)} soles por kilo "
+                    f"(equivale a {half_kilo} soles por 1/2 kilo)."
                 )
 
             return (
-                f"El último precio registrado de {product.name} es {ChatService._fmt_num(latest.unit_price)} por {product.unit}."
+                f"El último precio registrado de {product.name} es {ChatService._fmt_num(latest.unit_price)} soles por {product.unit}."
             )
 
         for pattern in current_price_patterns:
@@ -1979,11 +1979,11 @@ class ChatService:
                 if product.unit == "kilo":
                     half_kilo = ChatService._fmt_num(current_price * 0.5)
                     return (
-                        f"El precio actual de {product.name} es {ChatService._fmt_num(current_price)} por kilo "
-                        f"(equivale a {half_kilo} por 1/2 kilo)."
+                        f"El precio actual de {product.name} es {ChatService._fmt_num(current_price)} soles por kilo "
+                        f"(equivale a {half_kilo} soles por 1/2 kilo)."
                     )
                 return (
-                    f"El precio actual de {product.name} es {ChatService._fmt_num(current_price)} por {product.unit}."
+                    f"El precio actual de {product.name} es {ChatService._fmt_num(current_price)} soles por {product.unit}."
                 )
 
             latest = PurchaseService.get_latest_purchase_for_product(db, product)
@@ -1995,11 +1995,11 @@ class ChatService:
             if product.unit == "kilo":
                 half_kilo = ChatService._fmt_num(latest.unit_price * 0.5)
                 return (
-                    f"El precio actual de {product.name} es {ChatService._fmt_num(latest.unit_price)} por kilo "
-                    f"(equivale a {half_kilo} por 1/2 kilo)."
+                    f"El precio actual de {product.name} es {ChatService._fmt_num(latest.unit_price)} soles por kilo "
+                    f"(equivale a {half_kilo} soles por 1/2 kilo)."
                 )
             return (
-                f"El precio actual de {product.name} es {ChatService._fmt_num(latest.unit_price)} por {product.unit}."
+                f"El precio actual de {product.name} es {ChatService._fmt_num(latest.unit_price)} soles por {product.unit}."
             )
 
         if re.search(r"(?:producto\s+)?(?:que\s+)?cuesta\s+mas|más\s+caro|mas\s+caro", text_n):
@@ -2009,7 +2009,7 @@ class ChatService:
             product, unit_price = result
             return (
                 f"Por último precio registrado, el producto que cuesta más es {product.name}: "
-                f"{ChatService._fmt_num(unit_price)} por {product.unit}."
+                f"{ChatService._fmt_num(unit_price)} soles por {product.unit}."
             )
 
         return None
@@ -2082,14 +2082,14 @@ class ChatService:
         if previous_price is None:
             if created_reference:
                 return (
-                    f"Listo. Registré el precio de {product.name} en {new_price_str} por {product.unit} "
+                    f"Listo. Registré el precio de {product.name} en {new_price_str} soles por {product.unit} "
                     "sin mover el stock."
                 )
-            return f"Listo. Guardé el primer precio de {product.name}: {new_price_str} por {product.unit}."
+            return f"Listo. Guardé el primer precio de {product.name}: {new_price_str} soles por {product.unit}."
 
         old_price_str = ChatService._fmt_num(previous_price)
         return (
-            f"Listo. Actualicé el precio de {product.name}: antes {old_price_str}, ahora {new_price_str} "
+            f"Listo. Actualicé el precio de {product.name}: antes {old_price_str} soles, ahora {new_price_str} soles "
             f"por {product.unit} (stock sin cambios)."
         )
 

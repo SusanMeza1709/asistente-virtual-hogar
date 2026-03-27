@@ -173,11 +173,16 @@
       renderHistory();
     }
 
+    function prepareForSpeech(text) {
+      // "0.20 céntimos" → "20 céntimos" so TTS doesn't read "cero punto veinte"
+      return text.replace(/\b0\.(\d{2})\s+céntimos\b/gi, (_, d) => `${parseInt(d, 10)} céntimos`);
+    }
+
     function speak(text) {
       if (!window.speechSynthesis) return;
       window.speechSynthesis.cancel();
 
-      const clean = String(text || '').trim();
+      const clean = prepareForSpeech(String(text || '').trim());
       if (!clean) return;
 
       const chunks = clean

@@ -1087,7 +1087,7 @@ class ChatService:
             # For small amounts use 10-cent rounding and preserve leading zero.
             rounded_subsol = round(amount * 10) / 10
             cents_rounded = int(round(rounded_subsol * 100))
-            return f"{rounded_subsol:.2f} ({cents_rounded} céntimos)"
+            return f"{rounded_subsol:.2f} céntimos"
 
         cents_total = int(round(amount * 100))
 

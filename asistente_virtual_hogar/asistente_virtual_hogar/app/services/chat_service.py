@@ -3470,10 +3470,6 @@ class ChatService:
             else:
                 notes.append("completa con lo que tienes")
 
-            if item.get("missing_in_fridge"):
-                fridge_text = ", ".join(item["missing_in_fridge"])
-                notes.append(f"en refri te falta: {fridge_text}")
-
             if item.get("prep_minutes") is not None:
                 notes.append(f"{item['prep_minutes']} min")
             if item.get("cost_estimate") is not None:
@@ -3483,9 +3479,8 @@ class ChatService:
             lines.append(f"Receta {idx}: {item['name']} ({item['meal']}) - {suffix}")
 
         healthy_header = " saludables" if healthy_only else ""
-        fridge_note = " (priorizando tu refri)" if in_fridge else ""
         return (
-            f"Te propongo estas recetas{healthy_header}{fridge_note}, priorizando las completas:\n"
+            f"Te propongo estas recetas{healthy_header} con lo que tienes en cocina y refri, priorizando las completas:\n"
             + "\n".join(lines)
             + "\n\nDime cuál deseas: receta 1, receta 2, receta 3 o receta 4."
         )

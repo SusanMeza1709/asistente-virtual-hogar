@@ -1962,6 +1962,63 @@ class ChatService:
         return None
 
     @staticmethod
+    def _try_set_price_without_purchase(db: Session, text_n: str) -> str | None:
+        patterns = [
+            r"(?:actualiza|actualizar|pon|poner|cambia|cambiar|registra|registrar)\s+(?:el\s+)?precio\s+(?:de|del|para)\s+(?P<name>.+?)\s+(?:a|por|en)\s+(?P<price>.+)",
+            r"precio\s+(?:de|del)\s+(?P<name>.+?)\s+(?:es|seria|sería)\s+(?P<price>.+)",
+        ]
+
+        parsed_name: str | None = None
+        parsed_price: float | None = None
+
+        for pattern in patterns:
+            match = re.search(pattern, text_n)
+            if not match:
+                continue
+            name_raw = match.group("name")
+            price_raw = match.group("price")
+            name = ChatService._clean_candidate_name(name_raw).title()
+            if not name:
+                return "Entendí que quieres actualizar un precio, pero no capté el producto."
+
+            # Reuse existing price parser by prefixing with "a ".
+            # Accepts formats like "5.5", "4 soles 50", "un sol".
+            parsed = ChatService._extract_unit_price(f"a {price_raw}")
+            if parsed is None or parsed < 0:
+                return "No pude leer el precio. Prueba así: 'actualiza precio de arroz a 4.20'."
+
+            parsed_name = name
+            parsed_price = parsed
+            break
+
+        if parsed_name is None or parsed_price is None:
+            return None
+
+        product = ChatService._find_product_flexible(db, parsed_name)
+        if not product:
+            return f"No encontré '{parsed_name}' en el inventario para actualizar su precio."
+
+        latest_before = PurchaseService.get_latest_purchase_for_product(db, product)
+        previous_price = latest_before.unit_price if latest_before else None
+
+        _, created_reference = PurchaseService.set_unit_price_without_stock(db, product, parsed_price)
+
+        new_price_str = ChatService._fmt_num(parsed_price)
+        if previous_price is None:
+            if created_reference:
+                return (
+                    f"Listo. Registré el precio de {product.name} en {new_price_str} por {product.unit} "
+                    "sin mover el stock."
+                )
+            return f"Listo. Guardé el primer precio de {product.name}: {new_price_str} por {product.unit}."
+
+        old_price_str = ChatService._fmt_num(previous_price)
+        return (
+            f"Listo. Actualicé el precio de {product.name}: antes {old_price_str}, ahora {new_price_str} "
+            f"por {product.unit} (stock sin cambios)."
+        )
+
+    @staticmethod
     def _build_inventory_reply(db: Session) -> str:
         AlertService.refresh_product_statuses(db)
         products = ProductService.list_products(db)
@@ -2414,6 +2471,11 @@ class ChatService:
             return ChatService._build_consume_first_reply(db)
 
         # 16.1 Price queries
+        set_price_reply = ChatService._try_set_price_without_purchase(db, text_i)
+        if set_price_reply:
+            return set_price_reply
+
+        # 16.2 Price queries
         price_query_reply = ChatService._try_price_queries(db, text_i)
         if price_query_reply:
             return price_query_reply

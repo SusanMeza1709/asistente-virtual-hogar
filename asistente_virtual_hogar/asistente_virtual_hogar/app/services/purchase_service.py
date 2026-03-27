@@ -78,3 +78,33 @@ class PurchaseService:
         InventoryService.increase_stock(db, product, payload.quantity)
         db.refresh(purchase)
         return purchase
+
+    @staticmethod
+    def set_unit_price_without_stock(db: Session, product: Product, unit_price: float) -> tuple[Purchase, bool]:
+        """
+        Set price without changing stock.
+
+        Returns (purchase_record, created_reference_record):
+        - created_reference_record=False when latest purchase was updated.
+        - created_reference_record=True when no purchases existed and a
+          reference purchase row (quantity=0) was created.
+        """
+        latest = PurchaseService.get_latest_purchase_for_product(db, product)
+        if latest:
+            latest.unit_price = unit_price
+            db.add(latest)
+            db.flush()
+            db.refresh(latest)
+            return latest, False
+
+        reference = Purchase(
+            product_id=product.id,
+            quantity=0,
+            unit_price=unit_price,
+            store="ajuste_precio",
+            purchased_at=datetime.utcnow(),
+        )
+        db.add(reference)
+        db.flush()
+        db.refresh(reference)
+        return reference, True

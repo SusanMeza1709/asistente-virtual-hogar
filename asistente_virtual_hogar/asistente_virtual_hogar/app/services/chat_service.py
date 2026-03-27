@@ -1122,8 +1122,10 @@ class ChatService:
         by_normalized: dict = {}
         for product in products:
             key = ChatService._normalize(product.name)
-            # Skip products with 1-2 char names from flexible matching to avoid false hits.
-            if len(key) <= 2:
+            # Short product names (≤2 chars, e.g. "te") are only allowed when
+            # the search target is also short (≤3 chars). This prevents "te"
+            # matching inside "detergente" while still finding it for "té".
+            if len(key) <= 2 and len(normalized_target) > 3:
                 continue
             by_normalized[key] = product
 
@@ -1132,7 +1134,7 @@ class ChatService:
 
         partial = [item for key, item in by_normalized.items() if normalized_target and normalized_target in key]
         if partial:
-            # Prefer the longest/closest match over the first arbitrary one.
+            # Prefer the closest match over the first arbitrary one.
             partial.sort(key=lambda p: SequenceMatcher(None, normalized_target, ChatService._normalize(p.name)).ratio(), reverse=True)
             return partial[0]
 

@@ -1920,7 +1920,7 @@ class ChatService:
             if inferred_total_price:
                 return (
                     f"Compré {qty_str} {unit} de {product.name}. "
-                    f"Total pagado: {amount} soles. Precio equivalente: {unit_price_str} soles por {unit}. "
+                    f"Total lote: {amount} soles. Equivale a {unit_price_str} soles por {unit}. "
                     f"Ahora tienes {total} {unit} en casa."
                     + weight_to_unit_note
                 )

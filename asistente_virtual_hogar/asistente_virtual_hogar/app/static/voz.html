@@ -51,6 +51,10 @@
     .history-item { margin-bottom: 10px; }
     .meta { opacity: 0.75; font-size: 12px; }
     .hint { opacity: 0.8; margin-bottom: 10px; }
+    .voice-row { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+    .voice-row label { white-space: nowrap; }
+    .voice-row select { flex: 1; padding: 6px 8px; border-radius: 8px; border: 1px solid #777; font-family: inherit; }
+    .voice-row button { padding: 6px 10px; font-size: 13px; }
   </style>
 </head>
 <body>
@@ -63,6 +67,12 @@
     <button id="sendBtn">Enviar texto</button>
     <button id="repeatBtn">Repetir respuesta</button>
     <button id="clearBtn">Limpiar historial</button>
+  </div>
+
+  <div class="voice-row">
+    <label for="voiceSelect">Voz:</label>
+    <select id="voiceSelect"><option value="">-- cargando voces --</option></select>
+    <button id="testVoiceBtn">&#9654; Probar</button>
   </div>
 
   <label for="userText">Tu mensaje:</label>
@@ -89,42 +99,47 @@
     let recognition = null;
     let lastAssistantReply = '';
     let conversation = [];
-    let availableVoices = [];
+    let manualVoiceIndex = null; // null = auto-pick
 
-    function loadVoices() {
-      if (!window.speechSynthesis) return;
-      availableVoices = window.speechSynthesis.getVoices() || [];
+    function getAllVoices() {
+      return (window.speechSynthesis && window.speechSynthesis.getVoices()) || [];
     }
 
-    function pickBestSpanishVoice() {
-      if (!availableVoices.length) return null;
-
-      const spanish = availableVoices.filter((voice) => String(voice.lang || '').toLowerCase().startsWith('es'));
-      if (!spanish.length) return null;
-
-      const ranked = [
-        'es-pe',
-        'es_pe',
-        'es-mx',
-        'es_mx',
-        'es-us',
-        'es_us',
-        'es-es',
-        'es_es'
-      ];
-
-      for (const langCode of ranked) {
-        const byLang = spanish.find((voice) => String(voice.lang || '').toLowerCase().includes(langCode));
-        if (byLang) return byLang;
-      }
-
-      const neuralLike = spanish.find((voice) => {
-        const name = String(voice.name || '').toLowerCase();
-        return name.includes('neural') || name.includes('natural') || name.includes('google') || name.includes('microsoft');
+    function populateVoiceSelector() {
+      const sel = document.getElementById('voiceSelect');
+      const voices = getAllVoices();
+      if (!voices.length) return;
+      sel.innerHTML = '';
+      voices.forEach((v, i) => {
+        const opt = document.createElement('option');
+        opt.value = i;
+        opt.textContent = `${v.name} (${v.lang})`;
+        // auto-select best Spanish voice by default
+        if (manualVoiceIndex === null && String(v.lang || '').toLowerCase().startsWith('es')) {
+          const ranked = ['es-pe','es-mx','es-us','es-ar','es-co','es-cl','es-es'];
+          const current = sel.querySelector('option[selected]');
+          const curLang = current ? voices[parseInt(current.value)].lang.toLowerCase() : '';
+          const newLang = v.lang.toLowerCase();
+          const newRank = ranked.findIndex(r => newLang.includes(r));
+          const curRank = ranked.findIndex(r => curLang.includes(r));
+          if (!current || (newRank !== -1 && (curRank === -1 || newRank < curRank))) {
+            opt.selected = true;
+          }
+        }
+        sel.appendChild(opt);
       });
-      if (neuralLike) return neuralLike;
+      // if nothing was auto-selected, select first Spanish voice found
+      if (!sel.querySelector('option[selected]')) {
+        const firstSpanish = voices.findIndex(v => String(v.lang || '').toLowerCase().startsWith('es'));
+        if (firstSpanish !== -1) sel.value = firstSpanish;
+      }
+    }
 
-      return spanish[0];
+    function getSelectedVoice() {
+      const sel = document.getElementById('voiceSelect');
+      const voices = getAllVoices();
+      const idx = parseInt(sel.value);
+      return (!isNaN(idx) && voices[idx]) ? voices[idx] : null;
     }
 
     function nowLabel() {
@@ -186,23 +201,17 @@
       const clean = prepareForSpeech(String(text || '').trim());
       if (!clean) return;
 
-      const chunks = clean
-        .split(/(?<=[.!?])\s+/)
-        .map((part) => part.trim())
-        .filter(Boolean);
+      const selectedVoice = getSelectedVoice();
 
-      const selectedVoice = pickBestSpanishVoice();
-      for (const part of (chunks.length ? chunks : [clean])) {
-        const utterance = new SpeechSynthesisUtterance(part);
-        utterance.lang = selectedVoice?.lang || 'es-PE';
-        utterance.rate = 0.95;
-        utterance.pitch = 1.0;
-        utterance.volume = 1.0;
-        if (selectedVoice) {
-          utterance.voice = selectedVoice;
-        }
-        window.speechSynthesis.speak(utterance);
+      const utterance = new SpeechSynthesisUtterance(clean);
+      utterance.lang = selectedVoice?.lang || 'es-PE';
+      utterance.rate = 0.95;
+      utterance.pitch = 1.0;
+      utterance.volume = 1.0;
+      if (selectedVoice) {
+        utterance.voice = selectedVoice;
       }
+      window.speechSynthesis.speak(utterance);
     }
 
     async function sendMessage(message) {
@@ -249,10 +258,17 @@
       reply.textContent = 'Historial limpiado.';
     });
 
+    document.getElementById('testVoiceBtn').addEventListener('click', () => {
+      speak('Hola, prueba de voz en español.');
+    });
+    document.getElementById('voiceSelect').addEventListener('change', () => {
+      manualVoiceIndex = parseInt(document.getElementById('voiceSelect').value);
+    });
+
     loadConversation();
-    loadVoices();
+    populateVoiceSelector();
     if (window.speechSynthesis && 'onvoiceschanged' in window.speechSynthesis) {
-      window.speechSynthesis.onvoiceschanged = loadVoices;
+      window.speechSynthesis.onvoiceschanged = populateVoiceSelector;
     }
     renderHistory();
     if (conversation.length) {

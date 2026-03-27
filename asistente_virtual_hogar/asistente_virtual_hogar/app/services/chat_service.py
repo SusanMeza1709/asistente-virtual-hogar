@@ -66,6 +66,14 @@ class ChatService:
         "inventario", "stock", "que tengo en casa", "qué tengo en casa", "lista de productos", "productos tengo",
         "que hay en casa", "qué hay en casa", "que hay en la refri", "qué hay en la refri", "mi despensa",
     )
+    STOCK_FULL_HINTS = (
+        "stock completo",
+        "stock total",
+        "todo el stock",
+        "inventario completo",
+        "inventario actual",
+        "lista completa",
+    )
     ALERT_HINTS = (
         "alerta", "alertas", "por vencer", "vencimiento", "falta comprar", "bajo stock", "avisos", "notificaciones",
     )
@@ -2086,6 +2094,41 @@ class ChatService:
         )
 
     @staticmethod
+    def _try_product_stock_query(db: Session, text_n: str) -> str | None:
+        # Let explicit full-inventory requests continue to the inventory list handler.
+        if ChatService._contains_any(text_n, ChatService.STOCK_FULL_HINTS):
+            return None
+
+        patterns = [
+            r"\bstock\s+(?:de|del)\s+(?P<name>.+)",
+            r"\bcantidad\s+(?:de|del)\s+(?P<name>.+)",
+            r"\bcuant[oa]s?\s+(?:queda|quedan|tengo|hay|tiene|tienen)\s+(?:de|del)?\s*(?P<name>.+)",
+        ]
+
+        for pattern in patterns:
+            match = re.search(pattern, text_n)
+            if not match:
+                continue
+
+            name = ChatService._clean_candidate_name(match.group("name")).title()
+            if not name:
+                return None
+
+            product = ChatService._find_product_flexible(db, name)
+            if not product:
+                return f"No encontré '{name}' en el inventario para revisar su stock."
+
+            current = ChatService._fmt_num(product.stock_current)
+            minimum = ChatService._fmt_num(product.stock_minimum)
+            location = product.location or "sin ubicación"
+            return (
+                f"Stock de {product.name}: {current} {product.unit}. "
+                f"Mínimo: {minimum} {product.unit}. Ubicación: {location}."
+            )
+
+        return None
+
+    @staticmethod
     def _current_price_key(product_id: int) -> str:
         return f"__current_price__::{product_id}"
 
@@ -2580,6 +2623,11 @@ class ChatService:
         consume_reply = ChatService._try_buy_or_consume(db, text, text_i, consume=True)
         if consume_reply:
             return consume_reply
+
+        # 18.5 Product stock query (single product)
+        stock_query_reply = ChatService._try_product_stock_query(db, text_i)
+        if stock_query_reply:
+            return stock_query_reply
 
         # 19. Inventory list
         if ChatService._contains_any(text_i, ChatService.INVENTORY_HINTS):

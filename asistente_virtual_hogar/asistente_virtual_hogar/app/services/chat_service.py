@@ -3,7 +3,7 @@ import re
 import random
 import unicodedata
 from datetime import datetime
-from difflib import get_close_matches
+from difflib import SequenceMatcher, get_close_matches
 from urllib.parse import quote
 
 from sqlalchemy.exc import IntegrityError
@@ -1149,18 +1149,25 @@ class ChatService:
             key = ChatService._normalize(product.name)
             if not key:
                 continue
-            if normalized_target == key or normalized_target in key or key in normalized_target:
+            # Avoid over-generic reverse containment like "te" in "detergente".
+            if normalized_target == key or normalized_target in key:
                 candidates.append(product)
 
         if not candidates:
             return ChatService._find_product_exact(db, raw_name)
 
+        def _score(product) -> float:
+            key = ChatService._normalize(product.name)
+            exact_bonus = 100.0 if key == normalized_target else 0.0
+            contains_bonus = 20.0 if normalized_target in key else 0.0
+            similarity = SequenceMatcher(None, normalized_target, key).ratio() * 10.0
+            return exact_bonus + contains_bonus + similarity
+
         matching_unit = [p for p in candidates if ChatService._normalize_unit_label(p.unit) == pref]
         if matching_unit:
-            matching_unit.sort(key=lambda p: len(ChatService._normalize(p.name)))
-            return matching_unit[0]
+            return max(matching_unit, key=_score)
 
-        return candidates[0]
+        return max(candidates, key=_score)
 
     # ------------------------------------------------------------------
     # Pending-confirmation handler

@@ -1078,6 +1078,25 @@ class ChatService:
         return f"{value:.2f}".rstrip("0").rstrip(".")
 
     @staticmethod
+    def _fmt_money(value: float) -> str:
+        amount = round(float(value), 2)
+        if amount < 0:
+            return f"menos {ChatService._fmt_money(abs(amount))}"
+
+        cents_total = int(round(amount * 100))
+        if cents_total < 100:
+            return f"{cents_total} céntimos"
+
+        soles = cents_total // 100
+        cents = cents_total % 100
+
+        if cents == 0:
+            return "un sol" if soles == 1 else f"{soles} soles"
+        if soles == 1:
+            return f"un sol con {cents} céntimos"
+        return f"{soles} soles con {cents} céntimos"
+
+    @staticmethod
     def _format_days(days: int | None) -> str:
         if days is None:
             return "sin fecha registrada"
@@ -1915,18 +1934,18 @@ class ChatService:
             ChatService._set_current_price_for_product(db, product, unit_price)
         total = ChatService._fmt_num(product.stock_current)
         if unit_price is not None:
-            amount = ChatService._fmt_num(unit_price * qty)
-            unit_price_str = ChatService._fmt_num(unit_price)
+            amount_str = ChatService._fmt_money(unit_price * qty)
+            unit_price_str = ChatService._fmt_money(unit_price)
             if inferred_total_price:
                 return (
                     f"Compré {qty_str} {unit} de {product.name}. "
-                    f"Total lote: {amount} soles. Equivale a {unit_price_str} soles por {unit}. "
+                    f"Total lote: {amount_str}. Equivale a {unit_price_str} por {unit}. "
                     f"Ahora tienes {total} {unit} en casa."
                     + weight_to_unit_note
                 )
             return (
-                f"Compré {qty_str} {unit} de {product.name} a {unit_price_str} soles por {unit}. "
-                f"Gasto registrado: {amount} soles. Ahora tienes {total} {unit} en casa."
+                f"Compré {qty_str} {unit} de {product.name} a {unit_price_str} por {unit}. "
+                f"Gasto registrado: {amount_str}. Ahora tienes {total} {unit} en casa."
                 + weight_to_unit_note
             )
         return (
@@ -2084,14 +2103,14 @@ class ChatService:
                 return f"Aún no tengo precio registrado para {product.name}."
 
             if product.unit == "kilo":
-                half_kilo = ChatService._fmt_num(latest.unit_price * 0.5)
+                half_kilo = ChatService._fmt_money(latest.unit_price * 0.5)
                 return (
-                    f"El último precio registrado de {product.name} es {ChatService._fmt_num(latest.unit_price)} soles por kilo "
-                    f"(equivale a {half_kilo} soles por 1/2 kilo)."
+                    f"El último precio registrado de {product.name} es {ChatService._fmt_money(latest.unit_price)} por kilo "
+                    f"(equivale a {half_kilo} por 1/2 kilo)."
                 )
 
             return (
-                f"El último precio registrado de {product.name} es {ChatService._fmt_num(latest.unit_price)} soles por {product.unit}."
+                f"El último precio registrado de {product.name} es {ChatService._fmt_money(latest.unit_price)} por {product.unit}."
             )
 
         for pattern in current_price_patterns:
@@ -2110,13 +2129,13 @@ class ChatService:
             current_price = ChatService._get_current_price_for_product(db, product)
             if current_price is not None:
                 if product.unit == "kilo":
-                    half_kilo = ChatService._fmt_num(current_price * 0.5)
+                    half_kilo = ChatService._fmt_money(current_price * 0.5)
                     return (
-                        f"El precio actual de {product.name} es {ChatService._fmt_num(current_price)} soles por kilo "
-                        f"(equivale a {half_kilo} soles por 1/2 kilo)."
+                        f"El precio actual de {product.name} es {ChatService._fmt_money(current_price)} por kilo "
+                        f"(equivale a {half_kilo} por 1/2 kilo)."
                     )
                 return (
-                    f"El precio actual de {product.name} es {ChatService._fmt_num(current_price)} soles por {product.unit}."
+                    f"El precio actual de {product.name} es {ChatService._fmt_money(current_price)} por {product.unit}."
                 )
 
             latest = PurchaseService.get_latest_purchase_for_product(db, product)
@@ -2126,13 +2145,13 @@ class ChatService:
             # Backward-compatible fallback: use latest historical price as current.
             ChatService._set_current_price_for_product(db, product, latest.unit_price)
             if product.unit == "kilo":
-                half_kilo = ChatService._fmt_num(latest.unit_price * 0.5)
+                half_kilo = ChatService._fmt_money(latest.unit_price * 0.5)
                 return (
-                    f"El precio actual de {product.name} es {ChatService._fmt_num(latest.unit_price)} soles por kilo "
-                    f"(equivale a {half_kilo} soles por 1/2 kilo)."
+                    f"El precio actual de {product.name} es {ChatService._fmt_money(latest.unit_price)} por kilo "
+                    f"(equivale a {half_kilo} por 1/2 kilo)."
                 )
             return (
-                f"El precio actual de {product.name} es {ChatService._fmt_num(latest.unit_price)} soles por {product.unit}."
+                f"El precio actual de {product.name} es {ChatService._fmt_money(latest.unit_price)} por {product.unit}."
             )
 
         if re.search(r"(?:producto\s+)?(?:que\s+)?cuesta\s+mas|más\s+caro|mas\s+caro", text_n):
@@ -2142,7 +2161,7 @@ class ChatService:
             product, unit_price = result
             return (
                 f"Por último precio registrado, el producto que cuesta más es {product.name}: "
-                f"{ChatService._fmt_num(unit_price)} soles por {product.unit}."
+                f"{ChatService._fmt_money(unit_price)} por {product.unit}."
             )
 
         return None
@@ -2211,18 +2230,18 @@ class ChatService:
         _, created_reference = PurchaseService.set_unit_price_without_stock(db, product, parsed_price)
         ChatService._set_current_price_for_product(db, product, parsed_price)
 
-        new_price_str = ChatService._fmt_num(parsed_price)
+        new_price_str = ChatService._fmt_money(parsed_price)
         if previous_price is None:
             if created_reference:
                 return (
-                    f"Listo. Registré el precio de {product.name} en {new_price_str} soles por {product.unit} "
+                    f"Listo. Registré el precio de {product.name} en {new_price_str} por {product.unit} "
                     "sin mover el stock."
                 )
-            return f"Listo. Guardé el primer precio de {product.name}: {new_price_str} soles por {product.unit}."
+            return f"Listo. Guardé el primer precio de {product.name}: {new_price_str} por {product.unit}."
 
-        old_price_str = ChatService._fmt_num(previous_price)
+        old_price_str = ChatService._fmt_money(previous_price)
         return (
-            f"Listo. Actualicé el precio de {product.name}: antes {old_price_str} soles, ahora {new_price_str} soles "
+            f"Listo. Actualicé el precio de {product.name}: antes {old_price_str}, ahora {new_price_str} "
             f"por {product.unit} (stock sin cambios)."
         )
 

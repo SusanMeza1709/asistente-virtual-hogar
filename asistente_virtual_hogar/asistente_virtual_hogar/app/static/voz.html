@@ -174,8 +174,9 @@
     }
 
     function prepareForSpeech(text) {
-      // "0.20 céntimos" → "20 céntimos" so TTS doesn't read "cero punto veinte"
-      return text.replace(/\b0\.(\d{2})\s+céntimos\b/gi, (_, d) => `${parseInt(d, 10)} céntimos`);
+      // "0.20" → "20" so TTS says "veinte" not "cero punto veinte cero"
+      // Applies to any sub-sol price like "0.20 céntimos" → "20 céntimos"
+      return text.replace(/\b0\.(\d{2})\b/g, (_, d) => String(parseInt(d, 10)));
     }
 
     function speak(text) {

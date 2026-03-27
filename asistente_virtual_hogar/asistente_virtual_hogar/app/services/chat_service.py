@@ -3808,8 +3808,17 @@ class ChatService:
             return any(_has_ingredient(key, available_names) for key in keys)
 
         dynamic_recipes: list[dict] = []
+        dynamic_names: set[str] = set()
+
+        def _add_dynamic_recipe(recipe: dict) -> None:
+            name = ChatService._normalize(str(recipe.get("name", "")))
+            if not name or name in dynamic_names:
+                return
+            dynamic_names.add(name)
+            dynamic_recipes.append(recipe)
+
         if _has_any(("7 semillas",)):
-            dynamic_recipes.append(
+            _add_dynamic_recipe(
                 {
                     "name": "Bebida de 7 semillas",
                     "meal": ("desayuno", "cena"),
@@ -3824,8 +3833,141 @@ class ChatService:
                 }
             )
 
+        # ── Desayunos dinámicos según inventario ─────────────────────────────
+        if _has_any(("fresa",)) and _has_any(("leche",)):
+            _add_dynamic_recipe(
+                {
+                    "name": "Batido de fresa con leche",
+                    "meal": ("desayuno",),
+                    "healthy": True,
+                    "required": ("fresa", "leche"),
+                    "optional": ("miel", "avena"),
+                    "steps": (
+                        "Lava y desinfecta 1 taza de fresas.",
+                        "Licua con 1 taza de leche fria por 30 segundos.",
+                        "Endulza ligeramente si deseas y sirve al momento.",
+                    ),
+                }
+            )
+
+        if _has_any(("fresa",)):
+            _add_dynamic_recipe(
+                {
+                    "name": "Jugo de fresa",
+                    "meal": ("desayuno",),
+                    "healthy": True,
+                    "required": ("fresa",),
+                    "optional": ("agua", "miel", "limon"),
+                    "steps": (
+                        "Lava una taza de fresa y retira tallos.",
+                        "Licua con agua fria hasta textura uniforme.",
+                        "Ajusta dulzor y sirve de inmediato.",
+                    ),
+                }
+            )
+
+        if _has_any(("papaya",)):
+            _add_dynamic_recipe(
+                {
+                    "name": "Jugo de papaya",
+                    "meal": ("desayuno",),
+                    "healthy": True,
+                    "required": ("papaya",),
+                    "optional": ("leche", "agua", "miel"),
+                    "steps": (
+                        "Pela y corta 1 taza de papaya en cubos.",
+                        "Licua con agua o leche fria hasta lograr textura suave.",
+                        "Sirve inmediatamente para conservar sabor y nutrientes.",
+                    ),
+                }
+            )
+
+        fruit_candidates = ["fresa", "papaya", "platano", "banana", "manzana"]
+        available_fruits = [fruit for fruit in fruit_candidates if _has_any((fruit,))]
+        if len(available_fruits) >= 2:
+            required_fruits = tuple(available_fruits[:2])
+            optional_fruits = tuple(available_fruits[2:])
+            _add_dynamic_recipe(
+                {
+                    "name": "Ensalada de frutas casera",
+                    "meal": ("desayuno", "cena"),
+                    "healthy": True,
+                    "required": required_fruits,
+                    "optional": optional_fruits + ("yogurt", "miel"),
+                    "steps": (
+                        "Pica la fruta disponible en cubos pequeños.",
+                        "Mezcla en un bowl y agrega yogurt o un toque de miel si tienes.",
+                        "Consume fresca para mejor textura.",
+                    ),
+                }
+            )
+
+        if _has_any(("pan",)) and _has_any(("mantequilla",)):
+            _add_dynamic_recipe(
+                {
+                    "name": "Tostadas con mantequilla",
+                    "meal": ("desayuno",),
+                    "healthy": False,
+                    "required": ("pan", "mantequilla"),
+                    "optional": ("mermelada",),
+                    "steps": (
+                        "Tuesta 2 rebanadas de pan hasta dorar.",
+                        "Unta mantequilla mientras el pan está caliente.",
+                        "Sirve con bebida caliente o jugo.",
+                    ),
+                }
+            )
+
+        if _has_any(("pan",)) and _has_any(("mermelada",)):
+            _add_dynamic_recipe(
+                {
+                    "name": "Pan con mermelada",
+                    "meal": ("desayuno", "cena"),
+                    "healthy": False,
+                    "required": ("pan", "mermelada"),
+                    "optional": ("mantequilla", "queso"),
+                    "steps": (
+                        "Tuesta ligeramente el pan si prefieres textura crocante.",
+                        "Unta una capa delgada de mantequilla (opcional).",
+                        "Agrega mermelada al gusto y sirve.",
+                    ),
+                }
+            )
+
+        if _has_any(("pan",)) and _has_any(("huevo",)):
+            _add_dynamic_recipe(
+                {
+                    "name": "Sanguche de huevo",
+                    "meal": ("desayuno", "cena"),
+                    "healthy": True,
+                    "required": ("pan", "huevo"),
+                    "optional": ("mayonesa", "tomate", "lechuga"),
+                    "steps": (
+                        "Cocina 1 o 2 huevos (hervidos o revueltos).",
+                        "Arma el sanguche con pan y añade tomate o lechuga si tienes.",
+                        "Usa poca mayonesa para equilibrar el sabor.",
+                    ),
+                }
+            )
+
+        if _has_any(("pan",)) and _has_any(("queso",)):
+            _add_dynamic_recipe(
+                {
+                    "name": "Sanguche de queso tostado",
+                    "meal": ("desayuno", "cena"),
+                    "healthy": False,
+                    "required": ("pan", "queso"),
+                    "optional": ("mantequilla", "ketchup"),
+                    "steps": (
+                        "Coloca queso entre dos panes.",
+                        "Tuesta en sartén con una pequeña capa de mantequilla hasta derretir el queso.",
+                        "Sirve caliente; agrega ketchup solo si deseas.",
+                    ),
+                }
+            )
+
         if _has_any(("limon", "limón")):
-            dynamic_recipes.append(
+            _add_dynamic_recipe(
                 {
                     "name": "Limonada casera",
                     "meal": ("desayuno", "almuerzo", "cena"),
@@ -3841,7 +3983,7 @@ class ChatService:
             )
 
         if _has_any(("pollo",)):
-            dynamic_recipes.append(
+            _add_dynamic_recipe(
                 {
                     "name": "Pollo a la olla",
                     "meal": ("almuerzo", "cena"),
@@ -3857,7 +3999,7 @@ class ChatService:
             )
 
         if _has_any(("arroz",)) and _has_any(("lenteja",)):
-            dynamic_recipes.append(
+            _add_dynamic_recipe(
                 {
                     "name": "Lentejas con arroz",
                     "meal": ("almuerzo", "cena"),
@@ -3873,7 +4015,7 @@ class ChatService:
             )
 
         if _has_any(("arroz",)) and _has_any(("garbanzo", "garganzo")):
-            dynamic_recipes.append(
+            _add_dynamic_recipe(
                 {
                     "name": "Garbanzo con arroz",
                     "meal": ("almuerzo", "cena"),

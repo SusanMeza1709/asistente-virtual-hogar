@@ -3676,15 +3676,17 @@ class ChatService:
 
         def _build_lunch_combo_options(pool: list[dict], max_options: int = 4) -> list[dict]:
             """Pick lunch combos with exactly 2 elements: plato principal + bebida/acompanamiento."""
-            beverages = [item for item in pool if _breakfast_block_label(str(item.get("name", ""))) == "Bebidas"]
-            companions = [
-                item for item in pool
-                if _breakfast_block_label(str(item.get("name", ""))) in ("Frutas", "Otras opciones")
-            ]
-            mains = [
-                item for item in pool
-                if item not in beverages and item not in companions
-            ]
+            def _is_beverage(item: dict) -> bool:
+                name_n = ChatService._normalize(str(item.get("name", "")))
+                return any(token in name_n for token in ("jugo", "batido", "licuado", "bebida", "limonada", "infusion"))
+
+            def _is_side(item: dict) -> bool:
+                name_n = ChatService._normalize(str(item.get("name", "")))
+                return any(token in name_n for token in ("ensalada", "fruta", "yogurt", "pan", "tostada", "sanguche", "sandwich"))
+
+            beverages = [item for item in pool if _is_beverage(item)]
+            mains = [item for item in pool if not _is_beverage(item) and not _is_side(item)]
+            companions = [item for item in pool if _is_side(item)]
 
             if not mains:
                 return []

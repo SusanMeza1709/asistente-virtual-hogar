@@ -3575,6 +3575,50 @@ class ChatService:
                 return "Frutas"
             return "Otras opciones"
 
+        def _select_breakfast_varied_options(pool: list[dict], max_options: int = 4) -> list[dict]:
+            """Pick breakfast options with block diversity using ranked pool order.
+            Target mix: up to 2 bebidas, up to 1 pan/sanguche, up to 1 frutas."""
+            grouped: dict[str, list[dict]] = {
+                "Bebidas": [],
+                "Panes/Sanguches": [],
+                "Frutas": [],
+                "Otras opciones": [],
+            }
+
+            for item in pool:
+                block = _breakfast_block_label(str(item.get("name", "")))
+                grouped.setdefault(block, []).append(item)
+
+            selected: list[dict] = []
+
+            def _take(block: str, limit: int) -> None:
+                for candidate in grouped.get(block, []):
+                    if len(selected) >= max_options:
+                        return
+                    if candidate in selected:
+                        continue
+                    if limit <= 0:
+                        return
+                    selected.append(candidate)
+                    limit -= 1
+
+            _take("Bebidas", 2)
+            _take("Panes/Sanguches", 1)
+            _take("Frutas", 1)
+
+            if len(selected) < max_options:
+                for block in ("Bebidas", "Panes/Sanguches", "Frutas", "Otras opciones"):
+                    for candidate in grouped.get(block, []):
+                        if len(selected) >= max_options:
+                            break
+                        if candidate in selected:
+                            continue
+                        selected.append(candidate)
+                    if len(selected) >= max_options:
+                        break
+
+            return selected[:max_options]
+
         ingredient_aliases: dict[str, tuple[str, ...]] = {
             "avena": ("avena", "quaker"),
             "quaker": ("avena", "quaker"),
@@ -3805,6 +3849,7 @@ class ChatService:
             )
 
         requested_meals = _requested_meals(text_n)
+        breakfast_only = len(requested_meals) == 1 and requested_meals[0] == "desayuno"
         healthy_only = _is_healthy_requested(text_n)
         time_pref = _requested_time_preference(text_n)
         budget_pref = _requested_budget_preference(text_n)
@@ -4220,7 +4265,7 @@ class ChatService:
             ]
 
         if gemini_options:
-            options = gemini_options
+            options = _select_breakfast_varied_options(gemini_options, 4) if breakfast_only else gemini_options[:4]
             source_note = " (con IA)"
         else:
             if weekly_used_norm and not explicit_repeat:
@@ -4243,7 +4288,8 @@ class ChatService:
             random.shuffle(incomplete)
 
             # Fresh complete first, then stale complete, incomplete only as last resort
-            options = (fresh_complete + stale_complete + incomplete)[:4]
+            ranked_pool = fresh_complete + stale_complete + incomplete
+            options = _select_breakfast_varied_options(ranked_pool, 4) if breakfast_only else ranked_pool[:4]
             source_note = ""
 
         if not options:
@@ -4274,8 +4320,6 @@ class ChatService:
             pass
 
         lines = []
-        breakfast_only = len(requested_meals) == 1 and requested_meals[0] == "desayuno"
-
         if breakfast_only:
             grouped: dict[str, list[tuple[int, dict]]] = {
                 "Bebidas": [],

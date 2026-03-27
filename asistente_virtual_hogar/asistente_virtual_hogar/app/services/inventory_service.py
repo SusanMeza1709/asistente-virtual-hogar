@@ -13,11 +13,11 @@ class InventoryService:
 
     @staticmethod
     def decrease_stock(db: Session, product: Product, quantity: float) -> Product:
-        if product.stock_current < quantity:
+        if product.stock_current <= 0:
             raise ValueError(
-                f"Stock insuficiente para {product.name}. Disponible: {product.stock_current} {product.unit}."
+                f"{product.name} ya está sin stock. No hay nada que descontar."
             )
-        product.stock_current -= quantity
+        product.stock_current = max(0.0, product.stock_current - quantity)
         db.commit()
         db.refresh(product)
         return product

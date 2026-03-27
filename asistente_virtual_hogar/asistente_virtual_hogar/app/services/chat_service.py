@@ -624,7 +624,7 @@ class ChatService:
             if re.search(rf"\b{token}\b", normalized):
                 return float(value)
 
-        for word, value in (("medio", 0.5), ("media", 0.5), ("cuarto", 0.25)):
+        for word, value in (("tres cuartos", 0.75), ("tres cuarto", 0.75), ("medio", 0.5), ("media", 0.5), ("cuarto", 0.25)):
             if re.search(rf"\b{word}\b", text):
                 return value
 
@@ -731,11 +731,15 @@ class ChatService:
                 return frac, unit
 
         word_fraction = re.search(
-            r"\b(?P<word>medio|media|cuarto)\s*(?P<unit>kilos?|kg|gramos?|g|tarros?|unidades?|litros?|l|docenas?|doc)?\b",
+            r"\b(?P<word>tres\s+cuartos?|medio|media|cuarto)\s*(?P<unit>kilos?|kg|gramos?|g|tarros?|unidades?|litros?|l|docenas?|doc)?\b",
             normalized,
         )
         if word_fraction:
-            value = {"medio": 0.5, "media": 0.5, "cuarto": 0.25}[word_fraction.group("word")]
+            raw_word = word_fraction.group("word")
+            if re.match(r"tres\s+cuartos?", raw_word):
+                value = 0.75
+            else:
+                value = {"medio": 0.5, "media": 0.5, "cuarto": 0.25}[raw_word]
             unit = ChatService._normalize_unit_label(word_fraction.group("unit"))
             return value, unit
 
@@ -771,13 +775,13 @@ class ChatService:
         # (e.g., "medio kilo ... a 3.50"). Whole quantities are usually unit price.
         fractional_hint = (
             qty < 1
-            or ChatService._contains_any(text_n, ("medio", "media", "cuarto", "1/2", "1/4", "3/4"))
+            or ChatService._contains_any(text_n, ("medio", "media", "cuarto", "tres cuartos", "1/2", "1/4", "3/4"))
         )
         if not fractional_hint:
             return False
 
         if re.search(
-            r"\b(?:a|por|costo|cost[óo]|me\s+costo|me\s+cost[óo])\s+(?:s\/|s\.)?\s*(?:\d+(?:[.,]\d+)?|un\s+sol|\d+\s+sol(?:es)?(?:\s+con\s+\d{1,2}\s+centimos?)?|\d+\s+sol(?:es)?\s+\d{1,2}(?:\s+centimos?)?)\b",
+            r"\b(?:a|por|costo|cost[óo]|me\s+costo|me\s+cost[óo])\s+(?:s\/|s\.)?\s*(?:\d+(?:[.,]\d+)?|un\s+sol|\d+\s+sol(?:es)?(?:\s+con\s+\d{1,2}(?:\s+centimos?)?)?|\d+\s+sol(?:es)?\s+\d{1,2}(?:\s+centimos?)?|(?:dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce|trece|catorce|quince|veinte)\s+sol(?:es)?)\b",
             text_n,
         ):
             return True
@@ -995,9 +999,33 @@ class ChatService:
     def _extract_unit_price(text: str) -> float | None:
         text_n = ChatService._normalize(text)
 
+        # Word-based sol amount for voice input: "tres soles con cincuenta"
+        _word_sol_map = {
+            "dos": 2, "tres": 3, "cuatro": 4, "cinco": 5, "seis": 6,
+            "siete": 7, "ocho": 8, "nueve": 9, "diez": 10, "once": 11,
+            "doce": 12, "trece": 13, "catorce": 14, "quince": 15, "veinte": 20,
+        }
+        _word_cent_map = {
+            "diez": 10, "quince": 15, "veinte": 20, "treinta": 30, "cuarenta": 40,
+            "cincuenta": 50, "sesenta": 60, "setenta": 70, "ochenta": 80, "noventa": 90,
+        }
+        word_price = re.search(
+            r"\b(?:a|por|costo|cost[óo]|me\s+costo|me\s+cost[óo])\s+"
+            r"(?P<soles_w>dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce|trece|catorce|quince|veinte)\s+sol(?:es)?"
+            r"(?:\s+con\s+(?P<cents_w>cincuenta|veinte|treinta|cuarenta|sesenta|setenta|ochenta|noventa|diez|quince)(?:\s+centimos?)?)?\b",
+            text_n,
+        )
+        if word_price:
+            soles = _word_sol_map.get(word_price.group("soles_w"), 0)
+            cents_word = word_price.group("cents_w")
+            cents = _word_cent_map.get(cents_word, 0) if cents_word else 0
+            return soles + cents / 100
+
         patterns = [
+            # "3 soles 50" (no connector)
             r"\b(?:a|por|costo|costo|me\s+costo)\s+(?P<soles>\d+|un)\s+sol(?:es)?\s+(?P<cents2>\d{1,2})(?:\s+centimos?)?\b",
-            r"\b(?:a|por|costo|costo|me\s+costo)\s+(?P<soles>\d+|un)\s+sol(?:es)?(?:\s+con\s+(?P<cents1>\d{1,2})\s+centimos?)?\b",
+            # "3 soles con 50" or "3 soles con 50 centimos" (centimos now optional)
+            r"\b(?:a|por|costo|costo|me\s+costo)\s+(?P<soles>\d+|un)\s+sol(?:es)?(?:\s+con\s+(?P<cents1>\d{1,2})(?:\s+centimos?)?)?\b",
         ]
         for pattern in patterns:
             match = re.search(pattern, text_n)
@@ -1636,7 +1664,7 @@ class ChatService:
                 qty_source = text_n
                 if not consume and unit_price is not None:
                     qty_source = re.sub(
-                        r"\b(?:me\s+cost[óo]|cost[óo]|costo|a|por)\s+(?:s\/|s\.)?\s*(?:\d+(?:[.,]\d+)?|un\s+sol|\d+\s+sol(?:es)?(?:\s+con\s+\d{1,2}\s+centimos?)?|\d+\s+sol(?:es)?\s+\d{1,2}(?:\s+centimos?)?)\b",
+                        r"\b(?:me\s+cost[óo]|cost[óo]|costo|a|por)\s+(?:s\/|s\.)?\s*(?:\d+(?:[.,]\d+)?|un\s+sol|\d+\s+sol(?:es)?(?:\s+con\s+\d{1,2}(?:\s+centimos?)?)?|\d+\s+sol(?:es)?\s+\d{1,2}(?:\s+centimos?)?|(?:dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce|trece|catorce|quince|veinte)\s+sol(?:es)?(?:\s+con\s+(?:cincuenta|veinte|treinta|cuarenta|sesenta|setenta|ochenta|noventa|diez|quince)(?:\s+centimos?)?)?)\b",
                         " ",
                         qty_source,
                     )
@@ -1657,7 +1685,7 @@ class ChatService:
                 reduced = re.sub(rf"\b(?:{action_pattern})\b", " ", reduced)
 
             reduced = re.sub(
-                r"\b(?:me\s+cost[óo]|cost[óo]|costo|a|por)\s+(?:s\/|s\.)?\s*(?:\d+(?:[.,]\d+)?|un\s+sol|\d+\s+sol(?:es)?(?:\s+con\s+\d{1,2}\s+centimos?)?|\d+\s+sol(?:es)?\s+\d{1,2}(?:\s+centimos?)?)\b",
+                r"\b(?:me\s+cost[óo]|cost[óo]|costo|a|por)\s+(?:s\/|s\.)?\s*(?:\d+(?:[.,]\d+)?|un\s+sol|\d+\s+sol(?:es)?(?:\s+con\s+\d{1,2}(?:\s+centimos?)?)?|\d+\s+sol(?:es)?\s+\d{1,2}(?:\s+centimos?)?|(?:dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce|trece|catorce|quince|veinte)\s+sol(?:es)?(?:\s+con\s+(?:cincuenta|veinte|treinta|cuarenta|sesenta|setenta|ochenta|noventa|diez|quince)(?:\s+centimos?)?)?)\b",
                 " ",
                 reduced,
             )
@@ -1670,7 +1698,7 @@ class ChatService:
             )
             reduced = re.sub(r"\b\d+\s*/\s*\d+\b", " ", reduced)
             reduced = re.sub(r"\b\d+(?:[.,]\d+)?\b", " ", reduced)
-            reduced = re.sub(r"\b(?:un|uno|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|medio|media|cuarto|kilo|kilos|kg|gramo|gramos|g|tarro|tarros|unidad|unidades|docena|docenas|litro|litros|el|la|los|las|sol|soles|centimo|centimos|con|y)\b", " ", reduced)
+            reduced = re.sub(r"\b(?:un|uno|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|medio|media|cuartos?|kilo|kilos|kg|gramo|gramos|g|tarro|tarros|unidad|unidades|docena|docenas|litro|litros|el|la|los|las|sol|soles|centimo|centimos|con|y|cincuenta|veinte|treinta|cuarenta|sesenta|setenta|ochenta|noventa)\b", " ", reduced)
             name = ChatService._clean_candidate_name(reduced)
             if not name:
                 if consume:
@@ -1725,35 +1753,56 @@ class ChatService:
             input_unit = product.unit
 
         # ── Weight-to-unit special case ──────────────────────────────────
-        # e.g. "compré 1 kilo de naranjas a 3 soles, vienen 10"
-        # Product is stored as "unidad" but user bought by weight.
-        # If the user tells us the count we can derive per-unit price.
+        # Case A: product stored as "unidad", user bought by weight → use piece count
+        # Case B: product stored as "kilo", user tells how many pieces came → migrate to unidad
         weight_to_unit_note = ""
-        if (
-            not consume
-            and ChatService._is_weight_unit(input_unit)
-            and product.unit == "unidad"
-        ):
+        if not consume:
             piece_count = ChatService._extract_unit_count_from_purchase(text_n)
-            if piece_count:
-                # We know how many pieces: qty = piece_count, price per unit = total/count
+
+            if ChatService._is_weight_unit(input_unit) and product.unit == "unidad":
+                # Case A: product is already tracked in unidades, purchase in kilo
+                if piece_count:
+                    if unit_price is not None and unit_price > 0:
+                        total_paid = unit_price * qty
+                        unit_price = round(total_paid / piece_count, 4)
+                        weight_to_unit_note = (
+                            f" ({ChatService._fmt_num(qty)} {input_unit} → "
+                            f"{piece_count} unidades a {ChatService._fmt_num(unit_price)} c/u)"
+                        )
+                    else:
+                        weight_to_unit_note = (
+                            f" ({ChatService._fmt_num(qty)} {input_unit} → {piece_count} unidades)"
+                        )
+                    qty = float(piece_count)
+                    input_unit = "unidad"
+                else:
+                    # No piece count: store the raw weight quantity
+                    input_unit = product.unit
+
+            elif product.unit == "kilo" and piece_count and qty > 0:
+                # Case B: product is tracked in kilos but user says how many pieces came.
+                # Migrate product unit from kilo to unidad.
+                ratio = piece_count / qty  # units per kilo
+                existing_units = round(product.stock_current * ratio)
                 if unit_price is not None and unit_price > 0:
-                    total_paid = unit_price * qty          # price was per-kilo * kilos
+                    total_paid = unit_price * qty
                     unit_price = round(total_paid / piece_count, 4)
                     weight_to_unit_note = (
-                        f" ({ChatService._fmt_num(qty)} {input_unit} → "
-                        f"{piece_count} unidades a {ChatService._fmt_num(unit_price)} c/u)"
+                        f" ({ChatService._fmt_num(qty)} {input_unit or 'kilo'} → "
+                        f"{piece_count} unidades a {ChatService._fmt_num(unit_price)} c/u). "
+                        f"Cambié el producto de kilo a unidades."
                     )
                 else:
                     weight_to_unit_note = (
-                        f" ({ChatService._fmt_num(qty)} {input_unit} → {piece_count} unidades)"
+                        f" ({ChatService._fmt_num(qty)} {input_unit or 'kilo'} → "
+                        f"{piece_count} unidades). Cambié el producto de kilo a unidades."
                     )
+                ProductService.update_product(
+                    db, product, ProductUpdate(unit="unidad", stock_current=existing_units)
+                )
+                db.refresh(product)
                 qty = float(piece_count)
                 input_unit = "unidad"
-            else:
-                # No piece count provided — store by weight despite product.unit being "unidad".
-                # Treat the weight qty as-is and override product.unit for this transaction.
-                input_unit = product.unit  # skip kilo→unidad conversion (can't without count)
 
         qty_for_product_unit = ChatService._convert_qty_between_units(qty, input_unit, product.unit)
         if qty_for_product_unit is None:

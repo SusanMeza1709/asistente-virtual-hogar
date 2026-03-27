@@ -1135,6 +1135,33 @@ class ChatService:
         # can still be found when the user later says just "cebolla".
         return ChatService._find_product_flexible(db, raw_name)
 
+    @staticmethod
+    def _find_product_with_unit_preference(db: Session, raw_name: str, preferred_unit: str | None):
+        """Find a product by name, preferring records that match the requested unit."""
+        normalized_target = ChatService._normalize(raw_name)
+        pref = ChatService._normalize_unit_label(preferred_unit)
+        if not normalized_target or not pref:
+            return ChatService._find_product_exact(db, raw_name)
+
+        products = ProductService.list_products(db)
+        candidates = []
+        for product in products:
+            key = ChatService._normalize(product.name)
+            if not key:
+                continue
+            if normalized_target == key or normalized_target in key or key in normalized_target:
+                candidates.append(product)
+
+        if not candidates:
+            return ChatService._find_product_exact(db, raw_name)
+
+        matching_unit = [p for p in candidates if ChatService._normalize_unit_label(p.unit) == pref]
+        if matching_unit:
+            matching_unit.sort(key=lambda p: len(ChatService._normalize(p.name)))
+            return matching_unit[0]
+
+        return candidates[0]
+
     # ------------------------------------------------------------------
     # Pending-confirmation handler
     # ------------------------------------------------------------------
@@ -1710,7 +1737,12 @@ class ChatService:
         if qty <= 0:
             qty = 0.25 if not consume else 1.0
 
-        product = ChatService._find_product_exact(db, name)
+        lookup_unit = input_unit
+        # Natural consume phrases like "gasté una cebolla" should prefer unidad.
+        if consume and lookup_unit is None and qty > 0 and float(qty).is_integer():
+            lookup_unit = "unidad"
+
+        product = ChatService._find_product_with_unit_preference(db, name, lookup_unit)
         if not product:
             inferred_unit = ChatService._infer_default_unit(name)
             qty_for_default_unit = ChatService._convert_qty_between_units(qty, input_unit, inferred_unit)

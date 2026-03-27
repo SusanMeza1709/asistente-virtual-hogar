@@ -89,6 +89,43 @@
     let recognition = null;
     let lastAssistantReply = '';
     let conversation = [];
+    let availableVoices = [];
+
+    function loadVoices() {
+      if (!window.speechSynthesis) return;
+      availableVoices = window.speechSynthesis.getVoices() || [];
+    }
+
+    function pickBestSpanishVoice() {
+      if (!availableVoices.length) return null;
+
+      const spanish = availableVoices.filter((voice) => String(voice.lang || '').toLowerCase().startsWith('es'));
+      if (!spanish.length) return null;
+
+      const ranked = [
+        'es-pe',
+        'es_pe',
+        'es-mx',
+        'es_mx',
+        'es-us',
+        'es_us',
+        'es-es',
+        'es_es'
+      ];
+
+      for (const langCode of ranked) {
+        const byLang = spanish.find((voice) => String(voice.lang || '').toLowerCase().includes(langCode));
+        if (byLang) return byLang;
+      }
+
+      const neuralLike = spanish.find((voice) => {
+        const name = String(voice.name || '').toLowerCase();
+        return name.includes('neural') || name.includes('natural') || name.includes('google') || name.includes('microsoft');
+      });
+      if (neuralLike) return neuralLike;
+
+      return spanish[0];
+    }
 
     function nowLabel() {
       return new Date().toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -138,10 +175,28 @@
 
     function speak(text) {
       if (!window.speechSynthesis) return;
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = 'es-ES';
       window.speechSynthesis.cancel();
-      window.speechSynthesis.speak(utterance);
+
+      const clean = String(text || '').trim();
+      if (!clean) return;
+
+      const chunks = clean
+        .split(/(?<=[.!?])\s+/)
+        .map((part) => part.trim())
+        .filter(Boolean);
+
+      const selectedVoice = pickBestSpanishVoice();
+      for (const part of (chunks.length ? chunks : [clean])) {
+        const utterance = new SpeechSynthesisUtterance(part);
+        utterance.lang = selectedVoice?.lang || 'es-PE';
+        utterance.rate = 0.95;
+        utterance.pitch = 1.0;
+        utterance.volume = 1.0;
+        if (selectedVoice) {
+          utterance.voice = selectedVoice;
+        }
+        window.speechSynthesis.speak(utterance);
+      }
     }
 
     async function sendMessage(message) {
@@ -189,6 +244,10 @@
     });
 
     loadConversation();
+    loadVoices();
+    if (window.speechSynthesis && 'onvoiceschanged' in window.speechSynthesis) {
+      window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
     renderHistory();
     if (conversation.length) {
       const lastAssistant = [...conversation].reverse().find((item) => item.role === 'assistant');
@@ -199,7 +258,7 @@
 
     if (Recognition) {
       recognition = new Recognition();
-      recognition.lang = 'es-ES';
+      recognition.lang = 'es-PE';
       recognition.interimResults = false;
       recognition.maxAlternatives = 1;
 

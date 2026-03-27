@@ -1083,9 +1083,13 @@ class ChatService:
         if amount < 0:
             return f"menos {ChatService._fmt_money(abs(amount))}"
 
+        if amount < 1:
+            # For small amounts use 10-cent rounding and preserve leading zero.
+            rounded_subsol = round(amount * 10) / 10
+            cents_rounded = int(round(rounded_subsol * 100))
+            return f"{rounded_subsol:.2f} ({cents_rounded} céntimos)"
+
         cents_total = int(round(amount * 100))
-        if cents_total < 100:
-            return f"{cents_total} céntimos"
 
         soles = cents_total // 100
         cents = cents_total % 100

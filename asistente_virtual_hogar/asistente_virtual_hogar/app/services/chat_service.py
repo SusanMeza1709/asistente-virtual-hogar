@@ -439,6 +439,7 @@ class ChatService:
         "comprame": "comprar",
         "compre": "comprar",
         "compree": "comprar",
+        "comprete": "comprar te",   # voice artifact: "compré té" → "Compreté"
         "traje": "comprar",
         "trajee": "comprar",
         "repone": "reponer",
@@ -1342,7 +1343,15 @@ class ChatService:
         if normalized_target in by_normalized:
             return by_normalized[normalized_target]
 
-        partial = [item for key, item in by_normalized.items() if normalized_target and normalized_target in key]
+        # Only match when the search term is a prefix of the product name or vice versa.
+        # This prevents e.g. "canela" (6 chars) from matching "Te Canela Y Clavo" because
+        # "canela" appears as a middle word, not at the start of that product's name.
+        partial = [
+            item for key, item in by_normalized.items()
+            if normalized_target and (
+                key.startswith(normalized_target) or normalized_target.startswith(key)
+            )
+        ]
         if partial:
             # Prefer the closest match over the first arbitrary one.
             partial.sort(key=lambda p: SequenceMatcher(None, normalized_target, ChatService._normalize(p.name)).ratio(), reverse=True)

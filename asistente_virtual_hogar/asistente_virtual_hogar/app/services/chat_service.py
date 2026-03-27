@@ -3093,6 +3093,7 @@ class ChatService:
             if len(cleaned_steps) >= 5 and avg_words >= 8 and vague_count <= 1:
                 return cleaned_steps
 
+        recipe_n = ChatService._normalize(recipe_name)
         ingredient_text = ", ".join(ingredients[:6]) if ingredients else "tus ingredientes disponibles"
         ingredient_n = [ChatService._normalize(item) for item in ingredients]
         has_legume = any(any(token in name for token in ("garban", "garganz", "lentej", "frijol")) for name in ingredient_n)
@@ -3100,41 +3101,93 @@ class ChatService:
         has_onion = any("cebolla" in name for name in ingredient_n)
         has_garlic = any("ajo" in name for name in ingredient_n)
         has_lemon = any("limon" in name for name in ingredient_n)
+        has_rice = any("arroz" in name for name in ingredient_n)
+        has_pasta = any(any(token in name for token in ("fideo", "pasta")) for name in ingredient_n)
+        has_protein = any(
+            any(token in name for token in ("pollo", "huevo", "atun", "atun", "pescado", "carne"))
+            for name in ingredient_n
+        )
 
-        detailed = [
-            f"Alista la mise en place para 1 persona: separa {ingredient_text}, lava y desinfecta todo, y pica fino lo que vaya en aderezo.",
-        ]
-
-        if has_legume:
-            detailed.append(
-                "Si el grano está crudo y seco, déjalo en remojo de 8 a 12 horas; luego enjuágalo y cocínalo en agua limpia entre 35 y 50 minutos, hasta que quede suave al morder."
-            )
-            detailed.append(
-                "Si ya está cocido, enjuágalo y resérvalo para integrarlo al final y evitar que se deshaga."
-            )
+        is_stir_fry = any(token in recipe_n for token in ("saltado", "salteado", "chaufa"))
+        is_sudado = "sudado" in recipe_n
+        is_olla = "olla" in recipe_n
+        is_guiso = "guiso" in recipe_n or has_legume or has_potato
 
         aderezo_parts = []
         if has_onion:
             aderezo_parts.append("cebolla")
         if has_garlic:
             aderezo_parts.append("ajo")
-        if aderezo_parts:
+        aderezo_text = ", ".join(aderezo_parts) if aderezo_parts else "una base aromatica"
+
+        detailed = [
+            f"Alista la mise en place para 1 persona: separa {ingredient_text}, lava y desinfecta todo, y pica fino lo que vaya en aderezo.",
+        ]
+
+        if is_stir_fry:
+            if has_rice:
+                detailed.append(
+                    "Si usaras arroz para chaufa, cocinalo antes y enfriarlo 10 minutos para que no se apelmace al saltear; usa 1 taza de arroz cocido por porcion."
+                )
+            if has_pasta:
+                detailed.append(
+                    "Si lleva fideo o pasta, hiervelos en agua con sal hasta punto al dente (8 a 10 minutos), escurre y reserva con unas gotas de aceite."
+                )
             detailed.append(
-                f"En una sartén, calienta 1 cucharada de aceite a fuego medio y sofríe {', '.join(aderezo_parts)} de 4 a 6 minutos, moviendo, hasta que tome color dorado y aroma intenso."
+                f"Calienta la sarten o wok a fuego alto, agrega 1 cucharada de aceite y saltea {aderezo_text} por 2 a 3 minutos sin dejar de mover."
+            )
+            if has_protein:
+                detailed.append(
+                    "Incorpora la proteina principal en tiras o cubos y dorala 4 a 6 minutos; primero sella, luego mueve para que no pierda jugos."
+                )
+            detailed.append(
+                "Agrega el carbohidrato base y saltea 2 a 4 minutos, mezclando con movimientos envolventes para integrar sabores sin romper la textura."
+            )
+            detailed.append(
+                "Sazona al final, prueba punto de sal y sirve de inmediato para mantener el salteado jugoso y con buen color."
+            )
+        elif is_sudado:
+            detailed.append(
+                f"En olla ancha, sofrie {aderezo_text} a fuego medio por 5 minutos hasta que el aderezo quede brillante y aromatico."
+            )
+            detailed.append(
+                "Agrega 3/4 de taza de agua, tapa y deja hervir suave 3 minutos para formar base de coccion."
+            )
+            detailed.append(
+                "Coloca la proteina encima sin mover demasiado y cocina tapado a fuego medio-bajo de 10 a 15 minutos para que se cocine al vapor del aderezo."
+            )
+            detailed.append(
+                "Destapa, baña con su jugo, corrige sal y cocina 2 minutos mas hasta que la salsa espese ligeramente."
+            )
+        elif is_olla:
+            detailed.append(
+                f"Sella en olla la proteina o base del plato con 1 cucharada de aceite por 3 a 4 minutos; luego agrega {aderezo_text} y cocina 4 minutos."
+            )
+            detailed.append(
+                "Cubre con agua caliente o caldo hasta apenas tapar, lleva a hervor y baja a fuego medio-bajo."
+            )
+            if has_potato:
+                detailed.append(
+                    "Incorpora la papa a mitad de coccion y cocina 15 minutos para que quede tierna sin deshacerse."
+                )
+            detailed.append(
+                "Mantiene hervor suave 20 a 30 minutos, retirando espuma si aparece, hasta que el fondo quede concentrado y sabroso."
             )
         else:
+            if has_legume:
+                detailed.append(
+                    "Si la legumbre esta seca, remojala 8 a 12 horas; luego cocinala en agua limpia 35 a 50 minutos hasta que este suave. Si ya esta cocida, enjuagala y reserva."
+                )
             detailed.append(
-                "En una sartén, calienta 1 cucharada de aceite a fuego medio y prepara una base aromática con los ingredientes disponibles durante 3 a 5 minutos."
+                f"En una olla o sarten profunda, sofrie {aderezo_text} a fuego medio de 4 a 6 minutos hasta dorar ligeramente."
             )
-
-        if has_potato:
+            if has_potato:
+                detailed.append(
+                    "Agrega la papa en cubos, incorpora 1/2 taza de agua y cocina tapado 12 a 15 minutos a fuego medio-bajo hasta que este tierna."
+                )
             detailed.append(
-                "Agrega la papa en cubos medianos, incorpora un chorrito de agua (o caldo si tienes), tapa y cocina de 12 a 15 minutos a fuego medio-bajo hasta que esté tierna sin romperse."
+                "Integra la base principal del plato, sazona y cocina 5 a 8 minutos mas para que tome cuerpo; si espesa demasiado, añade 2 cucharadas de agua."
             )
-
-        detailed.append(
-            "Integra la proteína o legumbre principal, sazona con sal al gusto y cocina 5 a 8 minutos más para que los sabores se junten; si se seca, añade 2 o 3 cucharadas de agua."
-        )
 
         if has_lemon:
             detailed.append(

@@ -2129,6 +2129,33 @@ class ChatService:
         return None
 
     @staticmethod
+    def _try_products_without_location_query(db: Session, text_n: str) -> str | None:
+        triggers = [
+            r"\bproductos?\s+sin\s+ubicaci(?:on|ón)\b",
+            r"\bsin\s+ubicaci(?:on|ón)\b",
+            r"\bque\s+productos?\s+(?:no\s+)?tienen\s+ubicaci(?:on|ón)\b",
+            r"\bproductos?\s+sin\s+lugar\b",
+        ]
+        if not any(re.search(pattern, text_n) for pattern in triggers):
+            return None
+
+        products = ProductService.list_products(db)
+        if not products:
+            return "Tu inventario está vacío por ahora."
+
+        missing = [
+            product for product in products
+            if not (product.location or "").strip()
+            or ChatService._normalize(product.location or "") in ("sin ubicacion", "sin ubicacion.")
+        ]
+
+        if not missing:
+            return "Buenísimo: no tienes productos sin ubicación."
+
+        lines = [f"- {product.name}: {ChatService._fmt_num(product.stock_current)} {product.unit}" for product in missing]
+        return "Estos productos están sin ubicación:\n" + "\n".join(lines)
+
+    @staticmethod
     def _current_price_key(product_id: int) -> str:
         return f"__current_price__::{product_id}"
 
@@ -2628,6 +2655,11 @@ class ChatService:
         stock_query_reply = ChatService._try_product_stock_query(db, text_i)
         if stock_query_reply:
             return stock_query_reply
+
+        # 18.6 Products without location
+        without_location_reply = ChatService._try_products_without_location_query(db, text_i)
+        if without_location_reply:
+            return without_location_reply
 
         # 19. Inventory list
         if ChatService._contains_any(text_i, ChatService.INVENTORY_HINTS):

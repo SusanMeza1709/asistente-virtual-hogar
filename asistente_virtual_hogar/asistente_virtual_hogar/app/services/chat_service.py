@@ -1662,6 +1662,7 @@ class ChatService:
         unit_price: float | None = None
         reference_qty: float | None = None
         input_unit: str | None = None
+        inferred_total_price = False
 
         if match:
             qty = ChatService._extract_qty(match.group("qty"), default=1.0)
@@ -1707,6 +1708,7 @@ class ChatService:
                 and qty > 0
             ):
                 unit_price = unit_price / qty
+                inferred_total_price = True
 
             action_pattern = "|".join(actions)
             reduced = text_n
@@ -1874,9 +1876,17 @@ class ChatService:
         total = ChatService._fmt_num(product.stock_current)
         if unit_price is not None:
             amount = ChatService._fmt_num(unit_price * qty)
+            unit_price_str = ChatService._fmt_num(unit_price)
+            if inferred_total_price:
+                return (
+                    f"Compré {qty_str} {unit} de {product.name}. "
+                    f"Total pagado: {amount} soles. Precio equivalente: {unit_price_str} soles por {unit}. "
+                    f"Ahora tienes {total} {unit} en casa."
+                    + weight_to_unit_note
+                )
             return (
-                f"Compré {qty_str} {unit} de {product.name} a {ChatService._fmt_num(unit_price)} c/u. "
-                f"Gasto registrado: {amount}. Ahora tienes {total} {unit} en casa."
+                f"Compré {qty_str} {unit} de {product.name} a {unit_price_str} soles por {unit}. "
+                f"Gasto registrado: {amount} soles. Ahora tienes {total} {unit} en casa."
                 + weight_to_unit_note
             )
         return (

@@ -3066,6 +3066,102 @@ class ChatService:
         return "\n".join(lines)
 
     @staticmethod
+    def _call_gemini_for_recipes(
+        available_ingredients: list[str],
+        meal_hints: list[str],
+        healthy: bool,
+        last_shown: list[str],
+    ) -> list[dict] | None:
+        """Call Gemini API to generate recipe suggestions based on available ingredients.
+        Returns candidate dicts compatible with the local engine, or None on any error."""
+        import json as _json
+
+        try:
+            import httpx
+        except ImportError:
+            return None
+
+        api_key = os.getenv("GEMINI_API_KEY", "").strip()
+        if not api_key:
+            return None
+
+        meals_text = "/".join(meal_hints) if meal_hints else "almuerzo o cena"
+        healthy_clause = " Prioriza recetas saludables y balanceadas." if healthy else ""
+        avoid_clause = (
+            f" Evita repetir estas recetas que ya le mostré: {', '.join(last_shown[:6])}."
+            if last_shown
+            else ""
+        )
+        ingredients_text = ", ".join(available_ingredients[:35])
+
+        prompt = (
+            f"Tengo estos ingredientes en casa: {ingredients_text}.\n"
+            f"Genera exactamente 4 recetas peruanas COMPLETAS para {meals_text}.{healthy_clause}"
+            f"{avoid_clause}\n"
+            "REGLAS ESTRICTAS:\n"
+            "- Usa SOLO los ingredientes que te di, no agregues nada que no esté en la lista.\n"
+            "- Cada receta debe poder prepararse completamente con lo que hay disponible.\n"
+            "- Genera recetas variadas (distintos tipos de platos).\n"
+            "Responde ÚNICAMENTE con un JSON válido, sin texto adicional:\n"
+            '{"recetas": [{"nombre": "...", "tipo_comida": "almuerzo", '
+            '"ingredientes": ["ingrediente1"], "pasos": ["Paso 1...", "Paso 2..."], '
+            '"tiempo_minutos": 25}]}'
+        )
+
+        url = (
+            "https://generativelanguage.googleapis.com/v1beta/models/"
+            f"gemini-2.0-flash:generateContent?key={api_key}"
+        )
+        payload = {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {"temperature": 0.85, "maxOutputTokens": 1800},
+        }
+
+        try:
+            with httpx.Client(timeout=12.0) as client:
+                resp = client.post(url, json=payload)
+            if resp.status_code != 200:
+                return None
+            data = resp.json()
+            raw_text = data["candidates"][0]["content"]["parts"][0]["text"]
+            # Strip markdown code fences if Gemini wraps the JSON
+            raw_text = re.sub(r"^```(?:json)?\s*", "", raw_text.strip())
+            raw_text = re.sub(r"\s*```$", "", raw_text.strip())
+            parsed = _json.loads(raw_text)
+        except Exception:
+            return None
+
+        result: list[dict] = []
+        for r in (parsed.get("recetas") or [])[:4]:
+            name = str(r.get("nombre", "")).strip()
+            meal_raw = str(r.get("tipo_comida", "almuerzo")).strip().lower()
+            meal_tuple: tuple[str, ...] = (
+                (meal_raw,) if meal_raw in ("desayuno", "almuerzo", "cena") else ("almuerzo", "cena")
+            )
+            ingredients_used = [str(i).strip().lower() for i in (r.get("ingredientes") or []) if i]
+            steps = [str(s).strip() for s in (r.get("pasos") or []) if s]
+            minutes = int(r.get("tiempo_minutos") or 25)
+            if not name or not ingredients_used:
+                continue
+            result.append(
+                {
+                    "name": name,
+                    "meal": ", ".join(meal_tuple),
+                    "is_complete": True,
+                    "score": 100,
+                    "matched": ingredients_used,
+                    "missing": [],
+                    "missing_in_fridge": [],
+                    "steps": steps,
+                    "beverage_hint": None,
+                    "prep_minutes": minutes,
+                    "cost_estimate": None,
+                    "source": "gemini",
+                }
+            )
+        return result or None
+
+    @staticmethod
     def _build_recipes_reply(db: Session, text_n: str) -> str:
         global _PENDING
 
@@ -3443,28 +3539,66 @@ class ChatService:
                 }
             )
 
-        candidates.sort(key=lambda item: (item["is_complete"], item["score"]), reverse=True)
-        options = candidates[:4]
+        # ── Load last-shown names for variety tracking ───────────────────────
+        try:
+            _last_item = MemoryService.get_by_key(db, "__last_recipes__")
+            last_shown: list[str] = _last_item.value.split("|") if _last_item and _last_item.value else []
+        except Exception:
+            last_shown = []
+
+        # ── Try Gemini API first for richer, varied recipes ───────────────────
+        gemini_options = ChatService._call_gemini_for_recipes(
+            available_ingredients=available_names,
+            meal_hints=requested_meals,
+            healthy=healthy_only,
+            last_shown=last_shown,
+        )
+
+        if gemini_options:
+            options = gemini_options
+            source_note = " (con IA)"
+        else:
+            # Local engine: prefer complete recipes, shuffle within tier for variety
+            candidates.sort(key=lambda item: (item["is_complete"], item["score"]), reverse=True)
+            complete = [c for c in candidates if c["is_complete"]]
+            incomplete = [c for c in candidates if not c["is_complete"]]
+
+            last_shown_set = set(last_shown)
+            fresh_complete = [c for c in complete if c["name"] not in last_shown_set]
+            stale_complete = [c for c in complete if c["name"] in last_shown_set]
+
+            random.shuffle(fresh_complete)
+            random.shuffle(stale_complete)
+            random.shuffle(incomplete)
+
+            # Fresh complete first, then stale complete, incomplete only as last resort
+            options = (fresh_complete + stale_complete + incomplete)[:4]
+            source_note = ""
 
         if not options:
             healthy_note = " saludables" if healthy_only else ""
             return (
-                f"Con lo que hay en la refri aún no detecto recetas{healthy_note} claras de mi lista. "
-                "Si agregas 1 o 2 ingredientes más, te doy nuevas opciones."
+                f"No encontré recetas completas{healthy_note} con lo que tienes en cocina y refri. "
+                "Agrega más ingredientes y te doy nuevas opciones."
             )
 
         _PENDING.clear()
-        _PENDING.update(
-            {
-                "action": "recipe_choose",
-                "options": options,
-            }
-        )
+        _PENDING.update({"action": "recipe_choose", "options": options})
+
+        # Track shown recipe names for variety on next request
+        try:
+            shown_names = [item["name"] for item in options]
+            new_last = shown_names + [n for n in last_shown if n not in shown_names]
+            MemoryService.save_item(
+                db, MemoryCreate(key="__last_recipes__", value="|".join(new_last[:12]))
+            )
+        except Exception:
+            pass
 
         lines = []
         for idx, item in enumerate(options, start=1):
             notes: list[str] = []
-            if item["missing"]:
+            if item.get("missing"):
                 missing_text = ", ".join(item["missing"])
                 notes.append(f"te faltaria: {missing_text}")
             else:
@@ -3480,7 +3614,7 @@ class ChatService:
 
         healthy_header = " saludables" if healthy_only else ""
         return (
-            f"Te propongo estas recetas{healthy_header} con lo que tienes en cocina y refri, priorizando las completas:\n"
+            f"Te propongo estas recetas{healthy_header} con lo que tienes en cocina y refri{source_note}, priorizando las completas:\n"
             + "\n".join(lines)
             + "\n\nDime cuál deseas: receta 1, receta 2, receta 3 o receta 4."
         )

@@ -708,6 +708,33 @@ class ChatService:
         return "ALGODON"
 
     @staticmethod
+    def _lg_cycle_display_name(cycle_type: str) -> str:
+        labels = {
+            "ALGODON": "Algodón",
+            "ECO_40_60": "Eco 40-60",
+            "TURBOWASH_59": "TurboWash 59",
+            "MIXTOS": "Mixtos",
+            "SINTETICO": "Sintético",
+            "ANTIALERGICO": "Antialérgico",
+            "CUIDADO_INFANTIL_CON_VAPOR": "Cuidado Infantil con Vapor",
+            "DELICADO": "Delicado",
+            "LAVADO_A_MANO_LANA": "Lavado a Mano/Lana",
+            "RAPIDO_14": "Rápido 14",
+            "SOLO_SECADO": "Sólo Secado",
+            "LAVADO_SECADO": "Lavado+Secado",
+            "LIMPIEZA_DE_TAMBOR": "Limpieza de Tambor",
+            "DESCARGA_DE_CICLO": "Descarga de Ciclo",
+            "SECADO_NORMAL": "Secado Normal",
+            "SECADO_30_MIN": "Secado 30 min",
+            "SECADO_60_MIN": "Secado 60 min",
+            "SECADO_120_MIN": "Secado 120 min",
+            "SECADO_PLANCHADO": "Secado Planchado",
+            "SECADO_TEMPERATURA_BAJA": "Secado Temperatura Baja",
+            "SECADO_NORMAL_ECO": "Secado Normal Eco",
+        }
+        return labels.get(cycle_type, cycle_type.replace("_", " ").title())
+
+    @staticmethod
     def _try_lgthinq_status(db: Session, text_n: str) -> str | None:
         hints_match = ChatService._contains_any(text_n, ChatService.LGTHINQ_HINTS)
         contains_lg = bool(re.search(r"\blg\b", text_n))
@@ -813,8 +840,16 @@ class ChatService:
             if not LGThinQService.can_query(db):
                 return "LG ThinQ no está configurado."
             cycle_type = ChatService._detect_lg_cycle_type(text_n)
-            ok, msg = LGThinQService.start_cycle(db=db, cycle_type=cycle_type)
-            return msg
+            cycle_label = ChatService._lg_cycle_display_name(cycle_type)
+            global _PENDING
+            _PENDING.clear()
+            _PENDING.update({"action": "lg_start_cycle", "cycle_type": cycle_type, "cycle_label": cycle_label, "name": cycle_label})
+            try:
+                import json
+                MemoryService.save_item(db, MemoryCreate(key="__pending_create__", value=json.dumps(_PENDING)))
+            except Exception:
+                pass
+            return f"Perfecto. Seleccioné el ciclo {cycle_label}. ¿Quieres que lo inicie ahora? Responde sí o no."
 
         if asks_connect:
             return (
@@ -1827,6 +1862,15 @@ class ChatService:
             )
 
         if ChatService._contains_any(text_n, ChatService.CONFIRM_HINTS):
+            if action == "lg_start_cycle":
+                cycle_type = str(pending.get("cycle_type") or "ALGODON").strip()
+                cycle_label = str(pending.get("cycle_label") or ChatService._lg_cycle_display_name(cycle_type)).strip()
+                _clear_pending_state()
+                ok, msg = LGThinQService.start_cycle(db=db, cycle_type=cycle_type)
+                if ok:
+                    return msg
+                return f"No pude iniciar {cycle_label}. {msg}"
+
             if action == "create_product":
                 name = str(pending.get("name", "")).strip().title()
                 if not name:
@@ -1927,6 +1971,11 @@ class ChatService:
             return "Acción confirmada, pero no encontré qué hacer. Cuéntame de nuevo."
 
         if ChatService._contains_any(text_n, ChatService.DENY_HINTS):
+            if action == "lg_start_cycle":
+                cycle_label = str(pending.get("cycle_label") or "el ciclo").strip()
+                _clear_pending_state()
+                return f"Listo, no inicio {cycle_label}."
+
             pending_name = pending.get("name", "el producto")
             _clear_pending_state()
             
@@ -1948,6 +1997,9 @@ class ChatService:
             return "Antes de seguir, elige una opción: receta 1, receta 2, receta 3 o receta 4."
         if action == "recipe_whatsapp":
             return "Antes de seguir, confirma si te la envío por WhatsApp. Responde sí o no."
+        if action == "lg_start_cycle":
+            cycle_label = str(pending.get("cycle_label") or "el ciclo").strip()
+            return f"Antes de seguir: ¿quieres que inicie {cycle_label} en la lavadora LG? Responde sí o no."
 
         pending_name = pending.get("name", "el producto")
         return (

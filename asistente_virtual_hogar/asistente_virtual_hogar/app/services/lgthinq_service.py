@@ -314,6 +314,13 @@ class LGThinQService:
                 nested = LGThinQService._extract_list(value)
                 if nested:
                     return nested
+
+        # Fallback: walk any nested object/list keys in case provider wraps payload differently.
+        for value in payload.values():
+            if isinstance(value, (dict, list)):
+                nested = LGThinQService._extract_list(value)
+                if nested:
+                    return nested
         return []
 
     @staticmethod
@@ -346,21 +353,21 @@ class LGThinQService:
             "/devices",
             "/v1/devices",
             "/thinq/v1/devices",
-            "/v1/service/users/devices",
-            "/service/users/devices",
-            "/service/devices",
         )
         last_detail = "No se pudo obtener la lista de dispositivos de LG ThinQ."
+        attempt_details: list[str] = []
 
         for path in paths:
             ok, payload, detail = LGThinQService._request_json(path, db=db)
             if not ok:
                 last_detail = detail
+                attempt_details.append(detail)
                 continue
 
             raw_devices = LGThinQService._extract_list(payload)
             if not raw_devices:
-                continue
+                # If API answered OK but list is empty, treat it as a valid call, not an error.
+                return True, [], "OK"
 
             devices: list[dict] = []
             for item in raw_devices:
@@ -373,6 +380,8 @@ class LGThinQService:
                 )
             return True, devices, "OK"
 
+        if attempt_details:
+            return False, [], " | ".join(attempt_details[:3])
         return False, [], last_detail
 
     @staticmethod

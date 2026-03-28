@@ -617,6 +617,17 @@ class LGThinQService:
         "COMPLETED": "Completado",
     }
 
+    # States that allow device control (START, STOP commands)
+    _CONTROLLABLE_STATES = frozenset({
+        "INITIAL", "STANDBY", "END", "PAUSE", "PAUSED",
+        "POWER_ON", "ON", "IDLE", "READY",
+    })
+    # States that prevent control (device is off, sleeping, or executing)
+    _UNCONTROLLABLE_STATES = frozenset({
+        "SLEEP", "POWER_OFF", "OFF", "ERROR", "RUNNING",
+        "WASHING", "DRYING", "EXECUTING", "RESERVED",
+    })
+
     @staticmethod
     def _extract_scalar_value(val: any) -> str:
         """Extract readable scalar value from LG ThinQ nested structure."""
@@ -692,7 +703,11 @@ class LGThinQService:
 
     @staticmethod
     def start_cycle(db: Session | None = None, device_id: str | None = None, cycle_type: str = "NORMAL") -> tuple[bool, str]:
-        """Start a wash/dry cycle using correct LG API payload structure."""
+        """Start a wash/dry cycle using correct LG API payload structure.
+        
+        Validates device state before attempting to start cycle. Rejects if device is in
+        non-controllable state (SLEEP, POWER_OFF, ERROR, RUNNING, etc.).
+        """
         base_url = LGThinQService._base_url()
         pat = LGThinQService._api_pat()
         if not base_url or not pat:
@@ -704,6 +719,18 @@ class LGThinQService:
                 return False, "No encontré dispositivos LG ThinQ."
             device_id = str(devices[0].get("id", "")).strip()
 
+        # Pre-flight check: get current device state
+        ok, status_dict = LGThinQService.get_device_status(db, device_id)
+        if not ok or not status_dict:
+            return False, "No pude verificar el estado de la lavadora."
+        
+        current_state = status_dict.get("currentState", "UNKNOWN").upper()
+        
+        # Check if device is in a controllable state
+        if current_state in LGThinQService._UNCONTROLLABLE_STATES:
+            translated_state = LGThinQService._translate_state(current_state)
+            return False, f"La lavadora está en {translated_state} — no se puede iniciar un ciclo ahora."
+        
         command_path = f"/devices/{urllib.parse.quote(device_id)}/control"
         cycle_upper = str(cycle_type or "NORMAL").upper()
         

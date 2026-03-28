@@ -1,8 +1,10 @@
 import json
 import os
 import uuid
+import base64
 from datetime import datetime
 import urllib.parse
+import urllib.error
 import urllib.request
 
 from sqlalchemy.orm import Session
@@ -32,8 +34,19 @@ class LGThinQService:
         return (os.getenv("LGTHINQ_COUNTRY_CODE") or "US").strip()
 
     @staticmethod
-    def _language_code() -> str:
-        return (os.getenv("LGTHINQ_LANGUAGE_CODE") or "en-US").strip()
+    def _client_id() -> str:
+        # ThinQ requires a client identifier; stable fallback keeps troubleshooting easier.
+        return (os.getenv("LGTHINQ_CLIENT_ID") or "asistente-virtual-hogar").strip()
+
+    @staticmethod
+    def _api_key() -> str:
+        # Documented fixed key from LG ThinQ docs, but allow override by env.
+        return (os.getenv("LGTHINQ_API_KEY") or "v6GFvkweNo7DK7yD3ylIZ9w52aKBU0eJ7wLXkSR3").strip()
+
+    @staticmethod
+    def _message_id() -> str:
+        # url-safe-base64-no-padding UUIDv4, length 22.
+        return base64.urlsafe_b64encode(uuid.uuid4().bytes).decode("ascii").rstrip("=")
 
     @staticmethod
     def can_query(db: Session | None = None) -> bool:
@@ -43,9 +56,10 @@ class LGThinQService:
     def setup_instructions() -> str:
         return (
             "Para integrar LG ThinQ configura en Render: "
-            "LGTHINQ_API_BASE_URL (ej: https://iot.lgeapi.com) y "
+            "LGTHINQ_API_BASE_URL (ej: https://api-aic.lgthinq.com), "
             "LGTHINQ_API_PAT (tu Personal Access Token). "
-            "Opcional: LGTHINQ_DEFAULT_DEVICE_ID y LGTHINQ_WEBHOOK_SECRET."
+            "Opcional: LGTHINQ_COUNTRY_CODE, LGTHINQ_CLIENT_ID, LGTHINQ_API_KEY, "
+            "LGTHINQ_DEFAULT_DEVICE_ID y LGTHINQ_WEBHOOK_SECRET."
         )
 
     @staticmethod
@@ -251,17 +265,21 @@ class LGThinQService:
     def _request_json(path: str, db: Session | None = None) -> tuple[bool, dict | list | None, str]:
         base_url = LGThinQService._base_url()
         pat = LGThinQService._api_pat()
+        api_key = LGThinQService._api_key()
         if not base_url or not pat:
             return False, None, "LG ThinQ no tiene API configurada o falta el PAT."
+        if not api_key:
+            return False, None, "Falta LGTHINQ_API_KEY para llamar la API de LG ThinQ."
 
         url = f"{base_url}{path}"
         request = urllib.request.Request(url, method="GET")
-        request.add_header("Authorization", f"PAT {pat}")
+        request.add_header("Authorization", f"Bearer {pat}")
         request.add_header("Accept", "application/json")
         request.add_header("Content-Type", "application/json")
-        request.add_header("x-message-id", str(uuid.uuid4()).replace("-", "")[:22])
-        request.add_header("x-country-code", LGThinQService._country_code())
-        request.add_header("x-language-code", LGThinQService._language_code())
+        request.add_header("x-message-id", LGThinQService._message_id())
+        request.add_header("x-country", LGThinQService._country_code())
+        request.add_header("x-client-id", LGThinQService._client_id())
+        request.add_header("x-api-key", api_key)
         request.add_header("x-service-phase", "OP")
 
         try:
@@ -325,10 +343,10 @@ class LGThinQService:
     @staticmethod
     def list_devices(db: Session | None = None) -> tuple[bool, list[dict], str]:
         paths = (
+            "/devices",
             "/v1/service/users/devices",
             "/service/users/devices",
             "/service/devices",
-            "/devices",
         )
         last_detail = "No se pudo obtener la lista de dispositivos de LG ThinQ."
 

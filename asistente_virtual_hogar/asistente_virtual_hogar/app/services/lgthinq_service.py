@@ -720,7 +720,7 @@ class LGThinQService:
             device_id = str(devices[0].get("id", "")).strip()
 
         # Pre-flight check: get current device state
-        ok, status_dict = LGThinQService.get_device_status(db, device_id)
+        ok, _, status_dict, _ = LGThinQService.get_device_status(db)
         if not ok or not status_dict:
             return False, "No pude verificar el estado de la lavadora."
         

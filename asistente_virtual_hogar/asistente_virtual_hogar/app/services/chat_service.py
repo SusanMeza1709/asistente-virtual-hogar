@@ -688,8 +688,12 @@ class ChatService:
             cycle_name = explicit_cycle.group("name")
             cycle_name = re.sub(r"\b(lg|thinq|lavadora|secadora|ahora|ya|por\s+favor)\b", " ", cycle_name)
             cycle_name = re.sub(r"\s+", " ", cycle_name).strip(" .,-")
-            if cycle_name and cycle_name not in {"la", "el", "mi", "tu"}:
-                return re.sub(r"\s+", "_", ChatService._normalize(cycle_name)).upper()
+            stop_words = {"la", "el", "mi", "tu", "en", "de", "del", "al", "un", "una", "en la", "en el"}
+            normalized = ChatService._normalize(cycle_name)
+            if normalized and normalized not in stop_words:
+                meaningful_tokens = [token for token in normalized.split() if token not in stop_words]
+                if meaningful_tokens:
+                    return "_".join(meaningful_tokens).upper()
 
         return "NORMAL"
 

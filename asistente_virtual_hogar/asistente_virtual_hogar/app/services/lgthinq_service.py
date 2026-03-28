@@ -58,7 +58,8 @@ class LGThinQService:
             "Para integrar LG ThinQ configura en Render: "
             "LGTHINQ_API_BASE_URL (ej: https://api-aic.lgthinq.com), "
             "LGTHINQ_API_PAT (tu Personal Access Token). "
-            "Opcional: LGTHINQ_COUNTRY_CODE, LGTHINQ_CLIENT_ID, LGTHINQ_API_KEY, "
+            "Importante: LGTHINQ_COUNTRY_CODE debe coincidir con la region de tu cuenta (ej: PE, US, MX). "
+            "Opcional: LGTHINQ_CLIENT_ID, LGTHINQ_API_KEY, "
             "LGTHINQ_DEFAULT_DEVICE_ID y LGTHINQ_WEBHOOK_SECRET."
         )
 
@@ -295,6 +296,19 @@ class LGThinQService:
                 body = exc.read().decode("utf-8", errors="replace")[:300]
             except Exception:
                 pass
+            try:
+                parsed_error = json.loads(body) if body else {}
+            except Exception:
+                parsed_error = {}
+            error_code = str(((parsed_error.get("error") or {}).get("code") or "")).strip()
+            if error_code == "1309":
+                return (
+                    False,
+                    None,
+                    "LG ThinQ devolvio 1309 (Not allowed api call). "
+                    "Tu PAT no tiene permiso para Device API o el pais no coincide. "
+                    "Crea un PAT nuevo en connect-pat.lgthinq.com marcando Device API y configura LGTHINQ_COUNTRY_CODE (ej: PE).",
+                )
             return False, None, f"HTTP {exc.code} en {path}: {exc.reason}. {body}".strip()
         except Exception as exc:
             return False, None, f"No se pudo consultar LG ThinQ: {exc}"

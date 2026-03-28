@@ -458,6 +458,15 @@ class LGThinQService:
         return False, [], last_detail
 
     @staticmethod
+    def list_devices_raw(db: Session | None = None) -> tuple[bool, list[dict], str]:
+        """Return raw device dicts from the API (for diagnostics)."""
+        ok, payload, detail = LGThinQService._request_json("/devices", db=db)
+        if not ok:
+            return False, [], detail
+        raw = LGThinQService._extract_list(payload)
+        return True, raw, "OK"
+
+    @staticmethod
     def _pick_device(devices: list[dict], preferred_name: str | None = None) -> dict | None:
         if not devices:
             return None

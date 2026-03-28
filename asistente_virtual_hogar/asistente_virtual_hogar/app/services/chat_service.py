@@ -703,6 +703,10 @@ class ChatService:
             text_n,
             ("revisar alerta", "revisa alerta", "ver alerta", "ultimo evento", "último evento", "probar alerta", "probar alertas"),
         ) and ChatService._contains_any(text_n, ("lg", "thinq", "lavadora", "secadora"))
+        asks_diagnostics = ChatService._contains_any(
+            text_n,
+            ("diagnostico lg", "diagnóstico lg", "datos raw lg", "campos lg", "debug lg"),
+        )
 
         preferred_name = None
         if "lavadora" in text_n:
@@ -711,6 +715,22 @@ class ChatService:
             preferred_name = "secadora"
         elif "refrigeradora" in text_n or "refrigerador" in text_n or "refri" in text_n:
             preferred_name = "refrigeradora"
+
+        if asks_diagnostics:
+            if not LGThinQService.can_query(db):
+                return "LG ThinQ no está configurado."
+            ok_raw, raw_devices, raw_detail = LGThinQService.list_devices_raw(db)
+            if not ok_raw:
+                return f"No pude obtener datos. Detalle: {raw_detail}"
+            if not raw_devices:
+                return "La API respondió OK pero la lista de dispositivos llegó vacía."
+            lines = ["Campos raw del primer dispositivo LG ThinQ:"]
+            first = raw_devices[0]
+            for k, v in list(first.items())[:30]:
+                lines.append(f"  {k}: {v}")
+            if len(raw_devices) > 1:
+                lines.append(f"(Total dispositivos: {len(raw_devices)})")
+            return "\n".join(lines)
 
         if asks_connect:
             return (

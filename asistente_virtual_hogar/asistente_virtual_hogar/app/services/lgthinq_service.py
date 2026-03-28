@@ -374,6 +374,9 @@ class LGThinQService:
         for path in paths:
             ok, payload, detail = LGThinQService._request_json(path, db=db)
             if not ok:
+                if "1309" in detail:
+                    # 1309 means permission/region mismatch; trying other paths only adds noisy 404s.
+                    return False, [], detail
                 last_detail = detail
                 attempt_details.append(detail)
                 continue

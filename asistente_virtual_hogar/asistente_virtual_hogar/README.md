@@ -144,6 +144,50 @@ El asistente incluye integración con LG ThinQ usando un Personal Access Token p
 - El sistema detecta cambios de estado y registra eventos como `cycle_finished`
 - Si WhatsApp está configurado, intentará avisarte automáticamente cuando detecte que terminó el ciclo
 
+## Integrar Alexa sin cambiar la logica actual
+
+La API incluye un webhook para Alexa que reutiliza exactamente el mismo motor de chat:
+
+- `POST /alexa/webhook`
+
+Produccion:
+
+- `https://tu-app.onrender.com/alexa/webhook`
+
+La Skill de Alexa solo envia texto al backend y el backend responde usando `ChatService.reply(...)`, por lo que se mantiene el mismo comportamiento que ya tienes en web/chat.
+
+### 1) Crear Skill Custom en Alexa Developer Console
+
+1. Crea una Skill tipo `Custom`.
+2. En `Endpoint`, configura HTTPS apuntando a tu webhook.
+3. Guarda y construye el modelo.
+
+### 2) Interaction Model recomendado
+
+Define un intent libre, por ejemplo `ComandoHogarIntent`, con slot:
+
+- Slot name: `message`
+- Slot type: `AMAZON.SearchQuery`
+
+Utterances sugeridas:
+
+- `{message}`
+- `quiero {message}`
+- `necesito {message}`
+
+Con esto Alexa enviara frases completas como:
+
+- `estado de mi lavadora LG`
+- `inicia un ciclo delicado en la lavadora LG`
+- `comprar 2 leche`
+
+### 3) Intents nativos ya cubiertos
+
+- `AMAZON.HelpIntent`
+- `AMAZON.StopIntent`
+- `AMAZON.CancelIntent`
+- `AMAZON.FallbackIntent`
+
 ## Ejemplos de uso
 
 ### Crear producto

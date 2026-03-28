@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 
 from app.database.connection import Base, SessionLocal, engine
+from app.routes.alexa import router as alexa_router
 from app.routes.alerts import router as alerts_router
 from app.routes.chat import router as chat_router
 from app.routes.consumptions import router as consumptions_router
@@ -33,6 +34,7 @@ app.include_router(consumptions_router)
 app.include_router(alerts_router)
 app.include_router(memory_router)
 app.include_router(chat_router)
+app.include_router(alexa_router)
 app.include_router(dashboard_router)
 app.include_router(integrations_router)
 
@@ -47,7 +49,7 @@ def root():
         "docs": "/docs",
         "voz": "/voz",
         "panel": "/panel",
-        "modulos": ["productos", "compras", "consumos", "alertas", "memoria", "chat", "dashboard", "integrations"],
+        "modulos": ["productos", "compras", "consumos", "alertas", "memoria", "chat", "alexa", "dashboard", "integrations"],
     }
 
 

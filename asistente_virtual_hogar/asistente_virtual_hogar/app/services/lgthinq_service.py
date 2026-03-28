@@ -295,7 +295,7 @@ class LGThinQService:
                 body = exc.read().decode("utf-8", errors="replace")[:300]
             except Exception:
                 pass
-            return False, None, f"HTTP {exc.code}: {exc.reason}. {body}".strip()
+            return False, None, f"HTTP {exc.code} en {path}: {exc.reason}. {body}".strip()
         except Exception as exc:
             return False, None, f"No se pudo consultar LG ThinQ: {exc}"
 
@@ -344,6 +344,8 @@ class LGThinQService:
     def list_devices(db: Session | None = None) -> tuple[bool, list[dict], str]:
         paths = (
             "/devices",
+            "/v1/devices",
+            "/thinq/v1/devices",
             "/v1/service/users/devices",
             "/service/users/devices",
             "/service/devices",
@@ -422,7 +424,9 @@ class LGThinQService:
             return False, selected, {}, "El dispositivo LG ThinQ no tiene id disponible."
 
         status_paths = (
-            f"/service/devices/{urllib.parse.quote(device_id)}/status",
+            f"/devices/{urllib.parse.quote(device_id)}/state",
+            f"/v1/devices/{urllib.parse.quote(device_id)}/state",
+            f"/thinq/v1/devices/{urllib.parse.quote(device_id)}/state",
             f"/devices/{urllib.parse.quote(device_id)}/status",
             f"/service/devices/{urllib.parse.quote(device_id)}",
             f"/devices/{urllib.parse.quote(device_id)}",

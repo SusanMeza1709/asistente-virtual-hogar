@@ -370,20 +370,51 @@ class LGThinQService:
                 return str(value)
         return ""
 
+    # Map LG ThinQ numeric device-type codes to Spanish labels.
+    _DEVICE_TYPE_LABELS: dict[str, str] = {
+        "101": "Refrigerador", "102": "Refrigerador",
+        "201": "Lavadora", "202": "Secadora", "204": "Lavasecadora",
+        "301": "Lavavajillas",
+        "401": "Horno", "406": "Cocina",
+        "501": "Aire acondicionado", "502": "Purificador de aire",
+        "510": "Deshumidificador",
+        "601": "TV", "602": "Monitor", "603": "Proyector",
+        "701": "Robot aspirador",
+        "801": "Calentador de agua",
+        "WASHER": "Lavadora", "DRYER": "Secadora",
+        "REFRIGERATOR": "Refrigerador", "AIR_CONDITIONER": "Aire acondicionado",
+        "DISHWASHER": "Lavavajillas", "OVEN": "Horno",
+        "STYLE_WASHER": "Lavadora", "TOWERTYPE_WASHER_DRYER_COMBO": "Lavasecadora",
+    }
+
     @staticmethod
     def _device_name(device: dict) -> str:
-        for key in ("alias", "name", "deviceName", "modelName"):
-            value = device.get(key)
+        for key in ("alias", "name", "deviceAlias", "userDeviceName", "nickName",
+                    "deviceNickName", "deviceName", "title", "label"):
+            value = (device.get(key) or "").strip()
             if value:
-                return str(value)
+                return value
+        # Try to build a meaningful label from type + model.
+        type_val = (device.get("deviceType") or device.get("type") or "").strip()
+        type_label = LGThinQService._DEVICE_TYPE_LABELS.get(str(type_val).upper(),
+                     LGThinQService._DEVICE_TYPE_LABELS.get(str(type_val), ""))
+        model = (device.get("modelName") or device.get("model") or "").strip()
+        if type_label and model:
+            return f"{type_label} LG {model}"
+        if type_label:
+            return f"{type_label} LG"
+        if model:
+            return f"LG {model}"
         return "Dispositivo LG"
 
     @staticmethod
     def _device_type(device: dict) -> str:
-        for key in ("type", "deviceType", "platformType"):
-            value = device.get(key)
+        for key in ("deviceType", "type", "platformType"):
+            value = (device.get(key) or "").strip()
             if value:
-                return str(value)
+                label = LGThinQService._DEVICE_TYPE_LABELS.get(str(value).upper(),
+                        LGThinQService._DEVICE_TYPE_LABELS.get(str(value), ""))
+                return label or value
         return ""
 
     @staticmethod

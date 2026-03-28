@@ -679,7 +679,7 @@ class LGThinQService:
 
     @staticmethod
     def start_cycle(db: Session | None = None, device_id: str | None = None, cycle_type: str = "NORMAL") -> tuple[bool, str]:
-        """Start a wash/dry cycle. cycle_type examples: NORMAL, DELICATE, HEAVY, QUICK, etc."""
+        """Start a wash/dry cycle using correct LG API payload structure."""
         base_url = LGThinQService._base_url()
         pat = LGThinQService._api_pat()
         if not base_url or not pat:
@@ -694,11 +694,30 @@ class LGThinQService:
         command_path = f"/devices/{urllib.parse.quote(device_id)}/control"
         cycle_upper = str(cycle_type or "NORMAL").upper()
         
-        # Try multiple payload formats; LG API spec unclear
+        # Per LG OpenAPI spec: washer command structure requires location + operation + course/cycle fields
+        # Try multiple variations to accommodate different device types.
         payloads = [
-            {"command": "START", "cycle": cycle_upper},
-            {"command": "START", "commandData": {"cycleType": cycle_upper}},
-            {"command": "START", "cycleType": cycle_upper},
+            # Washer format with location + operation + course
+            {
+                "location": {"locationName": "MAIN"},
+                "operation": {"washerOperationMode": "START"},
+                "course": {"courseName": cycle_upper}
+            },
+            # Simpler format: location + operation
+            {
+                "location": {"locationName": "MAIN"},
+                "operation": {"washerOperationMode": "START"}
+            },
+            # Alternative: without location (for devices that might not need it)
+            {
+                "operation": {"washerOperationMode": "START"},
+                "course": {"courseName": cycle_upper}
+            },
+            # Dryer/other format
+            {
+                "location": {"locationName": "MAIN"},
+                "operation": {"dryerOperationMode": "START"}
+            },
         ]
 
         last_error = None
@@ -739,7 +758,7 @@ class LGThinQService:
 
     @staticmethod
     def stop_cycle(db: Session | None = None, device_id: str | None = None) -> tuple[bool, str]:
-        """Stop the current wash/dry cycle."""
+        """Stop the current wash/dry cycle using correct LG API format."""
         base_url = LGThinQService._base_url()
         pat = LGThinQService._api_pat()
         if not base_url or not pat:
@@ -752,37 +771,50 @@ class LGThinQService:
             device_id = str(devices[0].get("id", "")).strip()
 
         command_path = f"/devices/{urllib.parse.quote(device_id)}/control"
-        payload = {"command": "STOP"}
-        payload_json = json.dumps(payload)
+        
+        # Per LG OpenAPI spec: operation mode for STOP
+        payloads = [
+            {
+                "location": {"locationName": "MAIN"},
+                "operation": {"washerOperationMode": "STOP"}
+            },
+            {
+                "operation": {"washerOperationMode": "STOP"}
+            },
+        ]
 
-        for country in LGThinQService._country_candidates():
-            request = urllib.request.Request(
-                f"{base_url}{command_path}",
-                data=payload_json.encode("utf-8"),
-                method="POST",
-            )
-            request.add_header("Authorization", f"Bearer {pat}")
-            request.add_header("Accept", "application/json")
-            request.add_header("Content-Type", "application/json")
-            request.add_header("x-message-id", LGThinQService._message_id())
-            request.add_header("x-country", country)
-            request.add_header("x-client-id", LGThinQService._client_id())
-            request.add_header("x-api-key", LGThinQService._api_key())
-            request.add_header("x-service-phase", "OP")
-            try:
-                with urllib.request.urlopen(request, timeout=20) as response:
-                    response.read()
-                    return True, "Ciclo detenido."
-            except urllib.error.HTTPError as exc:
-                body = ""
+        last_error = None
+        for payload in payloads:
+            payload_json = json.dumps(payload)
+            for country in LGThinQService._country_candidates():
+                request = urllib.request.Request(
+                    f"{base_url}{command_path}",
+                    data=payload_json.encode("utf-8"),
+                    method="POST",
+                )
+                request.add_header("Authorization", f"Bearer {pat}")
+                request.add_header("Accept", "application/json")
+                request.add_header("Content-Type", "application/json")
+                request.add_header("x-message-id", LGThinQService._message_id())
+                request.add_header("x-country", country)
+                request.add_header("x-client-id", LGThinQService._client_id())
+                request.add_header("x-api-key", LGThinQService._api_key())
+                request.add_header("x-service-phase", "OP")
                 try:
-                    body = exc.read().decode("utf-8", errors="replace")[:300]
-                except Exception:
-                    pass
-                if exc.code == 401:
-                    continue
-                return False, f"No se pudo detener el ciclo. HTTP {exc.code}: {body}".strip()
-            except Exception as exc:
-                return False, f"Error al detener ciclo: {exc}"
+                    with urllib.request.urlopen(request, timeout=20) as response:
+                        response.read()
+                        return True, "Ciclo detenido."
+                except urllib.error.HTTPError as exc:
+                    body = ""
+                    try:
+                        body = exc.read().decode("utf-8", errors="replace")[:300]
+                    except Exception:
+                        pass
+                    last_error = f"HTTP {exc.code}: {body}"
+                    if exc.code == 401:
+                        continue
+                    break
 
-        return False, "No se pudo detener el ciclo (intente todos los países)."
+        if last_error:
+            return False, f"No se pudo detener el ciclo. {last_error}"
+        return False, "No se pudo detener el ciclo (probé todos los formatos)."

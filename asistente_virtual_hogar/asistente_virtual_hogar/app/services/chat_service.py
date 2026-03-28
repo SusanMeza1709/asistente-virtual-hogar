@@ -661,6 +661,18 @@ class ChatService:
 
     @staticmethod
     def _detect_lg_cycle_type(text_n: str) -> str:
+        def _phonetic_key(raw: str) -> str:
+            value = ChatService._normalize(raw)
+            value = value.replace("ll", "y")
+            value = value.replace("v", "b")
+            value = value.replace("z", "s")
+            value = value.replace("ce", "se").replace("ci", "si")
+            value = value.replace("que", "ke").replace("qui", "ki")
+            value = value.replace("ge", "je").replace("gi", "ji")
+            value = value.replace("h", "")
+            value = re.sub(r"\s+", " ", value).strip()
+            return value
+
         # One-to-one mapping for WD9PVC4S6 internal backend cycle names.
         cycle_aliases = (
             ("ALGODON", ("algodon", "algodón", "cotton", "normal")),
@@ -695,9 +707,35 @@ class ChatService:
             ("TEMPORADA_DE_LLUVIAS", ("temporada de lluvias", "temporada lluvias", "temprada de lluvias", "temporada de lluvias", "lluvias", "epoca de lluvias", "época de lluvias")),
             ("VACIAR", ("vaciar", "vasiar", "vasiar", "drenar", "desaguar", "vaciado")),
         )
+
+        normalized_text = ChatService._normalize(text_n)
+        phonetic_text = _phonetic_key(text_n)
+
         for code, hints in cycle_aliases:
             if ChatService._contains_any(text_n, hints):
                 return code
+
+        # Extra tolerance for voice transcription drift: compare phonetic keys.
+        best_code = None
+        best_score = 0.0
+        for code, hints in cycle_aliases:
+            for hint in hints:
+                hint_n = ChatService._normalize(str(hint))
+                hint_p = _phonetic_key(str(hint))
+                if hint_n and hint_n in normalized_text:
+                    return code
+                if hint_p and hint_p in phonetic_text:
+                    return code
+                n_score = SequenceMatcher(None, normalized_text, hint_n).ratio() if hint_n else 0.0
+                p_score = SequenceMatcher(None, phonetic_text, hint_p).ratio() if hint_p else 0.0
+                score = max(n_score, p_score)
+                if score > best_score:
+                    best_score = score
+                    best_code = code
+
+        # Threshold tuned to avoid accidental matches with unrelated phrases.
+        if best_code and best_score >= 0.80:
+            return best_code
 
         explicit_cycle = re.search(
             r"(?:ciclo|programa|lavado)\s+(?:de\s+)?(?P<name>[\w\sáéíóúñ-]{3,40})",

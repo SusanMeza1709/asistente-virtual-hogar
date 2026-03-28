@@ -256,14 +256,13 @@ class LGThinQService:
 
         url = f"{base_url}{path}"
         request = urllib.request.Request(url, method="GET")
-        request.add_header("Authorization", f"Bearer {pat}")
+        request.add_header("Authorization", f"PAT {pat}")
         request.add_header("Accept", "application/json")
         request.add_header("Content-Type", "application/json")
         request.add_header("x-message-id", str(uuid.uuid4()).replace("-", "")[:22])
         request.add_header("x-country-code", LGThinQService._country_code())
         request.add_header("x-language-code", LGThinQService._language_code())
         request.add_header("x-service-phase", "OP")
-        request.add_header("x-client-id", "thinq_app")
 
         try:
             with urllib.request.urlopen(request, timeout=20) as response:

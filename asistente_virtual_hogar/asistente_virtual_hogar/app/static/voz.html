@@ -73,6 +73,7 @@
     <label for="voiceSelect">Voz:</label>
     <select id="voiceSelect"><option value="">-- cargando voces --</option></select>
     <button id="testVoiceBtn">&#9654; Probar</button>
+    <button id="toggleAutoReadBtn" type="button">Autolectura: OFF</button>
   </div>
 
   <label for="userText">Tu mensaje:</label>
@@ -97,10 +98,83 @@
     const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     const STORAGE_KEY = 'asistente_hogar_historial';
     const VOICE_STORAGE_KEY = 'asistente_hogar_voice_name';
+    const AUTO_READ_STORAGE_KEY = 'asistente_hogar_auto_read';
     let recognition = null;
     let lastAssistantReply = '';
     let conversation = [];
     let manualVoiceIndex = null; // null = auto-pick
+    let autoReadEnabled = false;
+
+    function stopSpeech() {
+      if (!window.speechSynthesis) return;
+      window.speechSynthesis.cancel();
+    }
+
+    function shouldAutoRead(text) {
+      if (!autoReadEnabled) return false;
+      return Boolean(String(text || '').trim());
+    }
+
+    function buildAutoReadSpeechText(text) {
+      const clean = String(text || '').trim();
+      if (!clean) return '';
+
+      const normalized = normalizeText(clean);
+      const lines = clean
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean);
+
+      const isLong = clean.length > 280 || lines.length > 8;
+      const looksLikeRecipe =
+        normalized.includes('receta') ||
+        normalized.includes('ingredientes') ||
+        normalized.includes('preparacion') ||
+        normalized.includes('paso') ||
+        normalized.includes('opcion') ||
+        normalized.includes('desayuno') ||
+        normalized.includes('almuerzo') ||
+        normalized.includes('cena');
+
+      if (!isLong && !looksLikeRecipe) {
+        return clean;
+      }
+
+      const firstLine = lines[0] || 'Te compartí una respuesta larga.';
+      const secondLine =
+        lines.find((line, index) => index > 0 && !/^[-*\d]+[.)-]?\s*/.test(line)) ||
+        lines[1] ||
+        '';
+
+      const summary = [firstLine, secondLine]
+        .filter(Boolean)
+        .slice(0, 2)
+        .join('. ')
+        .trim();
+
+      return `${summary}. Si deseas, te la leo completa; solo dímelo.`;
+    }
+
+    function updateAutoReadButton() {
+      const btn = document.getElementById('toggleAutoReadBtn');
+      btn.textContent = `Autolectura: ${autoReadEnabled ? 'ON' : 'OFF'}`;
+      btn.setAttribute('aria-pressed', autoReadEnabled ? 'true' : 'false');
+    }
+
+    function loadAutoReadPreference() {
+      const saved = sessionStorage.getItem(AUTO_READ_STORAGE_KEY);
+      autoReadEnabled = saved === 'true';
+      updateAutoReadButton();
+    }
+
+    function toggleAutoReadPreference() {
+      autoReadEnabled = !autoReadEnabled;
+      sessionStorage.setItem(AUTO_READ_STORAGE_KEY, String(autoReadEnabled));
+      updateAutoReadButton();
+      if (!autoReadEnabled) {
+        stopSpeech();
+      }
+    }
 
     function getAllVoices() {
       return (window.speechSynthesis && window.speechSynthesis.getVoices()) || [];
@@ -244,7 +318,7 @@
 
     function speak(text) {
       if (!window.speechSynthesis) return;
-      window.speechSynthesis.cancel();
+      stopSpeech();
 
       if (!getAllVoices().length) {
         populateVoiceSelector();
@@ -289,7 +363,10 @@
         lastAssistantReply = text;
         reply.textContent = text;
         addHistory('assistant', text);
-        speak(text);
+        if (shouldAutoRead(text)) {
+          const speechText = buildAutoReadSpeechText(text);
+          speak(speechText);
+        }
       } catch (error) {
         const failMessage = 'No se pudo obtener respuesta del asistente.';
         lastAssistantReply = failMessage;
@@ -313,6 +390,9 @@
     document.getElementById('testVoiceBtn').addEventListener('click', () => {
       speak('Hola, prueba de voz en español.');
     });
+    document.getElementById('toggleAutoReadBtn').addEventListener('click', () => {
+      toggleAutoReadPreference();
+    });
     document.getElementById('voiceSelect').addEventListener('change', () => {
       manualVoiceIndex = parseInt(document.getElementById('voiceSelect').value);
       const selected = getSelectedVoice();
@@ -322,6 +402,7 @@
     });
 
     loadConversation();
+    loadAutoReadPreference();
     populateVoiceSelector();
     if (window.speechSynthesis && 'onvoiceschanged' in window.speechSynthesis) {
       window.speechSynthesis.onvoiceschanged = populateVoiceSelector;
@@ -340,6 +421,14 @@
       recognition.interimResults = false;
       recognition.maxAlternatives = 1;
 
+      recognition.onstart = () => {
+        stopSpeech();
+      };
+
+      recognition.onspeechstart = () => {
+        stopSpeech();
+      };
+
       recognition.onresult = (event) => {
         const transcript = event.results?.[0]?.[0]?.transcript || '';
         userText.value = transcript;
@@ -350,13 +439,23 @@
         reply.textContent = 'No se pudo reconocer tu voz. Revisa permisos de micrófono.';
       };
 
-      listenBtn.addEventListener('click', () => recognition.start());
-      stopBtn.addEventListener('click', () => recognition.stop());
+      listenBtn.addEventListener('click', () => {
+        stopSpeech();
+        recognition.start();
+      });
+      stopBtn.addEventListener('click', () => {
+        stopSpeech();
+        recognition.stop();
+      });
     } else {
       listenBtn.disabled = true;
       stopBtn.disabled = true;
       reply.textContent = 'Tu navegador no soporta reconocimiento de voz Web Speech API.';
     }
+
+    userText.addEventListener('input', () => {
+      stopSpeech();
+    });
   </script>
 </body>
 </html>

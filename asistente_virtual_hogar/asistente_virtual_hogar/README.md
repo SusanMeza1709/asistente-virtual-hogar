@@ -106,6 +106,44 @@ Despues de eso, en el chat:
 - `mi numero de whatsapp es 926342398`
 - `enviame la lista por whatsapp automatico`
 
+## Configurar LG ThinQ con Personal Access Token (PAT)
+
+El asistente incluye integración con LG ThinQ usando un Personal Access Token para acceso directo a dispositivos y estados.
+
+**Variables requeridas en Render (Environment):**
+
+- `LGTHINQ_API_BASE_URL` (ej: `https://api-aic.lgthinq.com`)
+- `LGTHINQ_API_PAT` (tu Personal Access Token)
+
+**Variables opcionales:**
+
+- `LGTHINQ_DEFAULT_DEVICE_ID` (si tienes varios dispositivos, específica cuál usar por defecto)
+- `LGTHINQ_WEBHOOK_SECRET` (para validar webhooks)
+
+**Pasos:**
+
+1. Obtén tu Personal Access Token (PAT) desde tu cuenta LG ThinQ
+2. Configura las variables en Render:
+   - `LGTHINQ_API_BASE_URL` = URL base de la API (ej: `https://api-aic.lgthinq.com`)
+   -` LGTHINQ_API_PAT` = el token que obtuviste
+3. Haz redeploy
+
+**Comandos de ejemplo en el chat:**
+
+- `lista mis dispositivos LG`
+- `estado de mi lavadora LG`
+- `estado de mi secadora LG`
+- `avísame cuando termine la lavadora LG`
+- `desactiva la alerta de la lavadora LG`
+- `revisar alerta LG`
+
+**Alertas automáticas:**
+
+- Si tu proveedor soporta webhook, envía eventos a `POST /integrations/lgthinq/webhook`
+- Si usas polling, llama a `POST /integrations/lgthinq/poll`
+- El sistema detecta cambios de estado y registra eventos como `cycle_finished`
+- Si WhatsApp está configurado, intentará avisarte automáticamente cuando detecte que terminó el ciclo
+
 ## Ejemplos de uso
 
 ### Crear producto

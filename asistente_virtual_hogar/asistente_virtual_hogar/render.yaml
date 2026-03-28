@@ -18,6 +18,14 @@ services:
         sync: false
       - key: TWILIO_WHATSAPP_FROM
         sync: false
+      - key: LGTHINQ_API_BASE_URL
+        sync: false
+      - key: LGTHINQ_API_PAT
+        sync: false
+      - key: LGTHINQ_WEBHOOK_SECRET
+        sync: false
+      - key: LGTHINQ_DEFAULT_DEVICE_ID
+        sync: false
 
 databases:
   - name: asistente-virtual-hogar-db

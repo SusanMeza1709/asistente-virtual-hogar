@@ -8,6 +8,7 @@ from app.routes.alerts import router as alerts_router
 from app.routes.chat import router as chat_router
 from app.routes.consumptions import router as consumptions_router
 from app.routes.dashboard import router as dashboard_router
+from app.routes.integrations import router as integrations_router
 from app.routes.memory import router as memory_router
 from app.routes.products import router as products_router
 from app.routes.purchases import router as purchases_router
@@ -33,6 +34,7 @@ app.include_router(alerts_router)
 app.include_router(memory_router)
 app.include_router(chat_router)
 app.include_router(dashboard_router)
+app.include_router(integrations_router)
 
 VOICE_UI_PATH = Path(__file__).parent / "static" / "voz.html"
 PANEL_UI_PATH = Path(__file__).parent / "static" / "panel.html"
@@ -45,7 +47,7 @@ def root():
         "docs": "/docs",
         "voz": "/voz",
         "panel": "/panel",
-        "modulos": ["productos", "compras", "consumos", "alertas", "memoria", "chat", "dashboard"],
+        "modulos": ["productos", "compras", "consumos", "alertas", "memoria", "chat", "dashboard", "integrations"],
     }
 
 

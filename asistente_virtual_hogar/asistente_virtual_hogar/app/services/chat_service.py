@@ -14,6 +14,7 @@ from app.services.alert_service import AlertService
 from app.services.consumption_service import ConsumptionService
 from app.services.dashboard_service import DashboardService
 from app.services.inventory_service import InventoryService
+from app.services.lgthinq_service import LGThinQService
 from app.services.memory_service import MemoryService
 from app.services.product_service import ProductService
 from app.services.purchase_service import PurchaseService
@@ -488,6 +489,28 @@ class ChatService:
     TONE_KEY = "__chat_tone__"
     LOCALE_KEY = "__chat_locale__"
     WHATSAPP_TO_KEY = "__whatsapp_to__"
+    LGTHINQ_HINTS = (
+        "lg thinq",
+        "thinq",
+        "conectar lg",
+        "conecta lg",
+        "vincular lg",
+        "vincula lg",
+        "alerta lg",
+        "alertas lg",
+        "lavadora termino",
+        "lavadora terminó",
+        "lavadora lg",
+        "secadora lg",
+        "refrigeradora lg",
+        "electrodomesticos lg",
+        "electrodomésticos lg",
+        "dispositivos lg",
+        "estado lavadora lg",
+        "estado secadora lg",
+        "estado de mi lavadora",
+        "estado de mi secadora",
+    )
     # Confirmation / denial
     CONFIRM_HINTS = (
         "si", "sí", "claro", "dale", "ok", "afirmativo", "por supuesto",
@@ -635,6 +658,147 @@ class ChatService:
 
         MemoryService.save_item(db, MemoryCreate(key=ChatService.WHATSAPP_TO_KEY, value=phone))
         return f"Listo. Guardé tu WhatsApp de destino: +{phone}."
+
+    @staticmethod
+    def _try_lgthinq_status(db: Session, text_n: str) -> str | None:
+        hints_match = ChatService._contains_any(text_n, ChatService.LGTHINQ_HINTS)
+        contains_lg = bool(re.search(r"\blg\b", text_n))
+        contains_thinq = "thinq" in text_n
+        asks_appliance_status = ChatService._contains_any(
+            text_n,
+            (
+                "estado lavadora",
+                "estado secadora",
+                "estado refrigeradora",
+                "estado refri",
+                "lavadora",
+                "secadora",
+            ),
+        ) and ChatService._contains_any(text_n, ("estado", "status", "como va", "cómo va"))
+
+        if not (hints_match or contains_lg or contains_thinq or asks_appliance_status):
+            return None
+
+        asks_setup = ChatService._contains_any(
+            text_n,
+            ("configurar", "conectar", "setup", "credenciales", "token", "api", "activar"),
+        )
+        asks_connect = ChatService._contains_any(
+            text_n,
+            ("conectar", "conecta", "vincular", "vincula", "iniciar sesion", "iniciar sesión", "login"),
+        )
+        asks_list = ChatService._contains_any(
+            text_n,
+            ("lista", "listar", "dispositivos", "equipos", "electrodomesticos", "electrodomésticos"),
+        )
+        asks_enable_alert = ChatService._contains_any(
+            text_n,
+            ("activar alerta", "activa alerta", "avisame", "avísame", "notificame", "notifícame"),
+        ) and ChatService._contains_any(text_n, ("lg", "thinq", "lavadora", "secadora"))
+        asks_disable_alert = ChatService._contains_any(
+            text_n,
+            ("desactivar alerta", "desactiva alerta", "apaga alerta", "quita alerta"),
+        ) and ChatService._contains_any(text_n, ("lg", "thinq", "lavadora", "secadora"))
+        asks_check_alert = ChatService._contains_any(
+            text_n,
+            ("revisar alerta", "revisa alerta", "ver alerta", "ultimo evento", "último evento", "probar alerta", "probar alertas"),
+        ) and ChatService._contains_any(text_n, ("lg", "thinq", "lavadora", "secadora"))
+
+        preferred_name = None
+        if "lavadora" in text_n:
+            preferred_name = "lavadora"
+        elif "secadora" in text_n:
+            preferred_name = "secadora"
+        elif "refrigeradora" in text_n or "refrigerador" in text_n or "refri" in text_n:
+            preferred_name = "refrigeradora"
+
+        if asks_connect:
+            return (
+                "La integración con LG ThinQ usa un Personal Access Token (PAT).\n"
+                "El token ya debería estar configurado en el servidor. "
+                + LGThinQService.setup_instructions()
+            )
+
+        if not LGThinQService.can_query(db):
+            return (
+                "Aún no tengo activa la integración con LG ThinQ. "
+                + LGThinQService.setup_instructions()
+                + " Luego prueba: 'conectar LG ThinQ', 'lista mis dispositivos LG' o 'estado de mi lavadora LG'."
+            )
+
+        if asks_enable_alert:
+            config = LGThinQService.save_alert_config(db, enabled=True, device_hint=preferred_name or "lavadora")
+            device_label = str(config.get("device_hint") or "lavadora")
+            return (
+                f"Listo. Activé las alertas automáticas de LG ThinQ para tu {device_label}. "
+                "Cuando detecte que terminó el ciclo, registraré el evento y si WhatsApp está operativo intentaré avisarte ahí también. "
+                "Si quieres probar ahora, dime: revisar alerta LG."
+            )
+
+        if asks_disable_alert:
+            config = LGThinQService.save_alert_config(db, enabled=False, device_hint=preferred_name or None)
+            device_label = str(config.get("device_hint") or "lavadora")
+            return f"Hecho. Dejé desactivadas las alertas automáticas de LG ThinQ para {device_label}."
+
+        if asks_check_alert:
+            config = LGThinQService.alert_config(db)
+            if config.get("enabled"):
+                ok_poll, event, detail = LGThinQService.poll_for_alerts(db, preferred_name=preferred_name)
+                if not ok_poll:
+                    return f"No pude revisar la alerta LG ThinQ ahora mismo. Detalle: {detail}."
+                if event:
+                    return f"Detecté este evento LG ThinQ:\n{event.get('message', 'Evento registrado.')}\n{event.get('notification', '')}".strip()
+            last_event = LGThinQService.last_event(db)
+            if last_event:
+                return (
+                    "Último evento LG ThinQ registrado:\n"
+                    f"- Equipo: {last_event.get('device_name', 'Dispositivo LG')}\n"
+                    f"- Tipo: {last_event.get('type', 'evento')}\n"
+                    f"- Mensaje: {last_event.get('message', 'Sin detalle')}\n"
+                    f"- Fecha: {last_event.get('created_at', 'sin fecha')}"
+                )
+            return "Todavía no tengo eventos LG ThinQ registrados. Si quieres, activa la alerta con: avísame cuando termine la lavadora LG."
+
+        if asks_setup:
+            return (
+                "La integración LG ThinQ ya está en el asistente. "
+                + LGThinQService.setup_instructions()
+            )
+
+        if asks_list:
+            ok, devices, detail = LGThinQService.list_devices(db)
+            if not ok:
+                return (
+                    "No pude listar tus dispositivos LG ThinQ por ahora. "
+                    f"Detalle: {detail}."
+                )
+            if not devices:
+                return "Consulté LG ThinQ, pero no encontré dispositivos vinculados en tu cuenta."
+
+            lines = ["Estos son tus dispositivos LG ThinQ:"]
+            for device in devices[:8]:
+                name = str(device.get("name", "Dispositivo LG")).strip()
+                dtype = str(device.get("type", "")).strip()
+                if dtype:
+                    lines.append(f"- {name} ({dtype})")
+                else:
+                    lines.append(f"- {name}")
+            if len(devices) > 8:
+                lines.append(f"... y {len(devices) - 8} más")
+            return "\n".join(lines)
+
+        ok, device, status, detail = LGThinQService.get_device_status(db, preferred_name=preferred_name)
+        if not ok:
+            return f"No pude obtener el estado de LG ThinQ en este momento. Detalle: {detail}."
+
+        device_name = str((device or {}).get("name") or "Tu dispositivo LG")
+        lines = [f"Estado de {device_name}:"]
+        status_lines = LGThinQService.summarize_status(status)
+        if status_lines:
+            lines.extend(status_lines)
+        else:
+            lines.append("- No recibí campos de estado legibles desde la API.")
+        return "\n".join(lines)
 
     @staticmethod
     def _dashboard_pdf_url(period_days: int = 30) -> str:
@@ -5058,6 +5222,11 @@ class ChatService:
         social_reply = ChatService._try_social_reply(db, text_i)
         if social_reply:
             return social_reply
+
+        # 4.1 LG ThinQ devices/status
+        lgthinq_reply = ChatService._try_lgthinq_status(db, text_i)
+        if lgthinq_reply:
+            return lgthinq_reply
 
         # 3. Memory save
         memory_reply = ChatService._try_memory_natural(db, text, text_i)

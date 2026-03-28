@@ -686,50 +686,56 @@ class LGThinQService:
             return False, "LG ThinQ no está configurado."
 
         if not device_id:
-            # If no device specified, try to find the first one.
             ok, devices, _ = LGThinQService.list_devices(db)
             if not devices:
                 return False, "No encontré dispositivos LG ThinQ."
             device_id = str(devices[0].get("id", "")).strip()
 
         command_path = f"/devices/{urllib.parse.quote(device_id)}/control"
-        payload = {
-            "command": "START",
-            "cycle": str(cycle_type or "NORMAL").upper(),
-        }
-        payload_json = json.dumps(payload)
+        cycle_upper = str(cycle_type or "NORMAL").upper()
+        
+        # Try multiple payload formats; LG API spec unclear
+        payloads = [
+            {"command": "START", "cycle": cycle_upper},
+            {"command": "START", "commandData": {"cycleType": cycle_upper}},
+            {"command": "START", "cycleType": cycle_upper},
+        ]
 
-        for country in LGThinQService._country_candidates():
-            request = urllib.request.Request(
-                f"{base_url}{command_path}",
-                data=payload_json.encode("utf-8"),
-                method="POST",
-            )
-            request.add_header("Authorization", f"Bearer {pat}")
-            request.add_header("Accept", "application/json")
-            request.add_header("Content-Type", "application/json")
-            request.add_header("x-message-id", LGThinQService._message_id())
-            request.add_header("x-country", country)
-            request.add_header("x-client-id", LGThinQService._client_id())
-            request.add_header("x-api-key", LGThinQService._api_key())
-            request.add_header("x-service-phase", "OP")
-            try:
-                with urllib.request.urlopen(request, timeout=20) as response:
-                    response.read()
-                    return True, f"Ciclo {cycle_type.upper()} iniciado en SujiLavadora."
-            except urllib.error.HTTPError as exc:
-                body = ""
+        last_error = None
+        for payload in payloads:
+            payload_json = json.dumps(payload)
+            for country in LGThinQService._country_candidates():
+                request = urllib.request.Request(
+                    f"{base_url}{command_path}",
+                    data=payload_json.encode("utf-8"),
+                    method="POST",
+                )
+                request.add_header("Authorization", f"Bearer {pat}")
+                request.add_header("Accept", "application/json")
+                request.add_header("Content-Type", "application/json")
+                request.add_header("x-message-id", LGThinQService._message_id())
+                request.add_header("x-country", country)
+                request.add_header("x-client-id", LGThinQService._client_id())
+                request.add_header("x-api-key", LGThinQService._api_key())
+                request.add_header("x-service-phase", "OP")
                 try:
-                    body = exc.read().decode("utf-8", errors="replace")[:300]
-                except Exception:
-                    pass
-                if exc.code == 401:
-                    continue
-                return False, f"No se pudo iniciar el ciclo. HTTP {exc.code}: {body}".strip()
-            except Exception as exc:
-                return False, f"Error al iniciar ciclo: {exc}"
+                    with urllib.request.urlopen(request, timeout=20) as response:
+                        response.read()
+                        return True, f"Ciclo {cycle_upper} iniciado en SujiLavadora."
+                except urllib.error.HTTPError as exc:
+                    body = ""
+                    try:
+                        body = exc.read().decode("utf-8", errors="replace")[:300]
+                    except Exception:
+                        pass
+                    last_error = f"HTTP {exc.code}: {body}"
+                    if exc.code == 401:
+                        continue
+                    break
 
-        return False, "No se pudo iniciar el ciclo (intente todos los países)."
+        if last_error:
+            return False, f"No se pudo iniciar el ciclo. {last_error}"
+        return False, "No se pudo iniciar el ciclo (probé todos los formatos)."
 
     @staticmethod
     def stop_cycle(db: Session | None = None, device_id: str | None = None) -> tuple[bool, str]:

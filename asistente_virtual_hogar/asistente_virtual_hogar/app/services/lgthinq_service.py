@@ -590,6 +590,7 @@ class LGThinQService:
     # Map LG state codes to human-friendly Spanish labels.
     _STATE_TRANSLATIONS: dict[str, str] = {
         "INITIAL": "Reposo",
+        "SLEEP": "Modo reposo",
         "TUB_CLEAN": "Limpieza de tambor",
         "DETECTING": "Detectando",
         "PREWASH": "Prelavado",
@@ -600,8 +601,20 @@ class LGThinQService:
         "RESERVE": "Reserva",
         "ERROR": "Error",
         "RUN": "Ejecutando",
+        "RUNNING": "En ejecución",
         "WASHING": "Lavando",
         "DRYING": "Secando",
+        "PAUSE": "Pausado",
+        "PAUSED": "Pausado",
+        "POWER_OFF": "Apagado",
+        "POWER_ON": "Encendido",
+        "STANDBY": "En espera",
+        "DRAINING": "Drenando",
+        "OFF": "Apagado",
+        "ON": "Encendido",
+        "RESERVED": "Reservado",
+        "COMPLETE": "Completo",
+        "COMPLETED": "Completado",
     }
 
     @staticmethod

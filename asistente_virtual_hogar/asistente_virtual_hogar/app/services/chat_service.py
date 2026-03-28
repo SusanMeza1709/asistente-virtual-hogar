@@ -661,20 +661,29 @@ class ChatService:
 
     @staticmethod
     def _detect_lg_cycle_type(text_n: str) -> str:
+        # One-to-one mapping for WD9PVC4S6 internal backend cycle names.
         cycle_aliases = (
-            ("DELICATE", ("delicado", "delicada", "ropa delicada", "delicate")),
-            ("QUICK", ("rapido", "rápido", "express", "express", "corto", "quick")),
-            ("ECO", ("eco", "ahorro", "economico", "económico")),
-            ("HEAVY", ("pesado", "pesada", "heavy", "intenso", "intensivo")),
-            ("COTTON", ("algodon", "algodón", "cotton")),
-            ("MIX", ("mixto", "mezcla", "mixed")),
-            ("RINSE_SPIN", ("enjuague centrifugado", "enjuague y centrifugado", "rinse spin")),
-            ("SPIN_ONLY", ("solo centrifugado", "solo centrifugar", "centrifugado", "spin")),
-            ("TUB_CLEAN", ("limpieza de tambor", "limpiar tambor", "tub clean", "autolimpieza")),
-            ("WOOL", ("lana", "wool")),
-            ("BEDDING", ("edredon", "edredón", "ropa de cama", "bedding")),
-            ("BABY_CARE", ("bebe", "bebé", "cuidado de bebe", "baby care")),
-            ("SPORTSWEAR", ("deporte", "ropa deportiva", "sportswear")),
+            ("ALGODON", ("algodon", "algodón", "cotton", "normal")),
+            ("ECO_40_60", ("eco 40-60", "eco 40 60", "eco40-60", "eco4060")),
+            ("TURBOWASH_59", ("turbowash 59", "turbo 59")),
+            ("MIXTOS", ("mixtos", "mixto", "mezcla", "mixed")),
+            ("SINTETICO", ("sintetico", "sintético", "sinteticos", "sintéticos")),
+            ("ANTIALERGICO", ("antialergico", "antialérgico", "alergias", "alergico")),
+            ("CUIDADO_INFANTIL_CON_VAPOR", ("cuidado infantil con vapor", "bebe vapor", "bebé vapor", "infantil vapor")),
+            ("DELICADO", ("delicado", "delicada", "ropa delicada", "delicate")),
+            ("LAVADO_A_MANO_LANA", ("lavado a mano", "mano", "lana", "wool")),
+            ("RAPIDO_14", ("rapido 14", "rápido 14", "rapido", "rápido", "quick")),
+            ("SOLO_SECADO", ("solo secado", "sólo secado", "secado")),
+            ("LAVADO_SECADO", ("lavado secado", "lavado y secado", "lava y seca", "lavaseca")),
+            ("LIMPIEZA_DE_TAMBOR", ("limpieza de tambor", "limpiar tambor", "tub clean", "autolimpieza")),
+            ("DESCARGA_DE_CICLO", ("descarga de ciclo", "download cycle", "enjuague y centrifugado", "enjuague centrifugado")),
+            ("SECADO_NORMAL", ("secado normal",)),
+            ("SECADO_30_MIN", ("secado 30", "secado 30 minutos")),
+            ("SECADO_60_MIN", ("secado 60", "secado 60 minutos")),
+            ("SECADO_120_MIN", ("secado 120", "secado 120 minutos")),
+            ("SECADO_PLANCHADO", ("planchado", "secado planchado")),
+            ("SECADO_TEMPERATURA_BAJA", ("temperatura baja", "secado temperatura baja", "secado suave")),
+            ("SECADO_NORMAL_ECO", ("normal eco", "secado eco")),
         )
         for code, hints in cycle_aliases:
             if ChatService._contains_any(text_n, hints):
@@ -691,11 +700,12 @@ class ChatService:
             stop_words = {"la", "el", "mi", "tu", "en", "de", "del", "al", "un", "una", "en la", "en el"}
             normalized = ChatService._normalize(cycle_name)
             if normalized and normalized not in stop_words:
-                meaningful_tokens = [token for token in normalized.split() if token not in stop_words]
-                if meaningful_tokens:
-                    return "_".join(meaningful_tokens).upper()
+                for code, hints in cycle_aliases:
+                    if any(ChatService._normalize(str(h)) == normalized for h in hints):
+                        return code
 
-        return "NORMAL"
+        # Safe default for this model when no explicit cycle was recognized.
+        return "ALGODON"
 
     @staticmethod
     def _try_lgthinq_status(db: Session, text_n: str) -> str | None:

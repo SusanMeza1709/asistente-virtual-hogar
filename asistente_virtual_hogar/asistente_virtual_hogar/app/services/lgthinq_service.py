@@ -49,6 +49,20 @@ class LGThinQService:
         return base64.urlsafe_b64encode(uuid.uuid4().bytes).decode("ascii").rstrip("=")
 
     @staticmethod
+    def _country_candidates() -> list[str]:
+        primary = LGThinQService._country_code().upper()
+        ordered = [primary, "PE", "US", "KR"]
+        seen: set[str] = set()
+        candidates: list[str] = []
+        for item in ordered:
+            value = (item or "").strip().upper()
+            if not value or value in seen:
+                continue
+            seen.add(value)
+            candidates.append(value)
+        return candidates
+
+    @staticmethod
     def can_query(db: Session | None = None) -> bool:
         return bool(LGThinQService._base_url() and LGThinQService._api_pat())
 
@@ -273,45 +287,56 @@ class LGThinQService:
             return False, None, "Falta LGTHINQ_API_KEY para llamar la API de LG ThinQ."
 
         url = f"{base_url}{path}"
-        request = urllib.request.Request(url, method="GET")
-        request.add_header("Authorization", f"Bearer {pat}")
-        request.add_header("Accept", "application/json")
-        request.add_header("Content-Type", "application/json")
-        request.add_header("x-message-id", LGThinQService._message_id())
-        request.add_header("x-country", LGThinQService._country_code())
-        request.add_header("x-client-id", LGThinQService._client_id())
-        request.add_header("x-api-key", api_key)
-        request.add_header("x-service-phase", "OP")
+        tried_countries: list[str] = []
+        last_1309_detail = ""
 
-        try:
-            with urllib.request.urlopen(request, timeout=20) as response:
-                payload = response.read().decode("utf-8", errors="replace")
-                if not payload.strip():
-                    return True, {}, "OK"
-                parsed = json.loads(payload)
-                return True, parsed, "OK"
-        except urllib.error.HTTPError as exc:
-            body = ""
+        for country in LGThinQService._country_candidates():
+            tried_countries.append(country)
+            request = urllib.request.Request(url, method="GET")
+            request.add_header("Authorization", f"Bearer {pat}")
+            request.add_header("Accept", "application/json")
+            request.add_header("Content-Type", "application/json")
+            request.add_header("x-message-id", LGThinQService._message_id())
+            request.add_header("x-country", country)
+            request.add_header("x-client-id", LGThinQService._client_id())
+            request.add_header("x-api-key", api_key)
+            request.add_header("x-service-phase", "OP")
+
             try:
-                body = exc.read().decode("utf-8", errors="replace")[:300]
-            except Exception:
-                pass
-            try:
-                parsed_error = json.loads(body) if body else {}
-            except Exception:
-                parsed_error = {}
-            error_code = str(((parsed_error.get("error") or {}).get("code") or "")).strip()
-            if error_code == "1309":
-                return (
-                    False,
-                    None,
-                    "LG ThinQ devolvio 1309 (Not allowed api call). "
-                    "Tu PAT no tiene permiso para Device API o el pais no coincide. "
-                    "Crea un PAT nuevo en connect-pat.lgthinq.com marcando Device API y configura LGTHINQ_COUNTRY_CODE (ej: PE).",
-                )
-            return False, None, f"HTTP {exc.code} en {path}: {exc.reason}. {body}".strip()
-        except Exception as exc:
-            return False, None, f"No se pudo consultar LG ThinQ: {exc}"
+                with urllib.request.urlopen(request, timeout=20) as response:
+                    payload = response.read().decode("utf-8", errors="replace")
+                    if not payload.strip():
+                        return True, {}, "OK"
+                    parsed = json.loads(payload)
+                    return True, parsed, "OK"
+            except urllib.error.HTTPError as exc:
+                body = ""
+                try:
+                    body = exc.read().decode("utf-8", errors="replace")[:300]
+                except Exception:
+                    pass
+                try:
+                    parsed_error = json.loads(body) if body else {}
+                except Exception:
+                    parsed_error = {}
+                error_code = str(((parsed_error.get("error") or {}).get("code") or "")).strip()
+                if error_code == "1309":
+                    last_1309_detail = body
+                    continue
+                return False, None, f"HTTP {exc.code} en {path}: {exc.reason}. {body}".strip()
+            except Exception as exc:
+                return False, None, f"No se pudo consultar LG ThinQ: {exc}"
+
+        if last_1309_detail:
+            return (
+                False,
+                None,
+                "LG ThinQ devolvio 1309 (Not allowed api call) para todos los paises probados: "
+                f"{', '.join(tried_countries)}. "
+                "Tu PAT no tiene permiso para Device API o pertenece a otra cuenta/region. "
+                f"Detalle: {last_1309_detail}",
+            )
+        return False, None, "No se pudo consultar LG ThinQ."
 
     @staticmethod
     def _extract_list(payload: dict | list | None) -> list[dict]:

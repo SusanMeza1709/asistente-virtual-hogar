@@ -707,6 +707,14 @@ class ChatService:
             text_n,
             ("diagnostico lg", "diagnóstico lg", "datos raw lg", "campos lg", "debug lg"),
         )
+        asks_start_cycle = ChatService._contains_any(
+            text_n,
+            ("inicia", "empieza", "comenzar", "arranca", "poner en marcha", "activa el ciclo"),
+        ) and ChatService._contains_any(text_n, ("lg", "thinq", "lavadora", "secadora"))
+        asks_stop_cycle = ChatService._contains_any(
+            text_n,
+            ("detén", "detente", "para", "paraaaaa", "detener", "apaga", "quitar", "cancela"),
+        ) and ChatService._contains_any(text_n, ("lg", "thinq", "lavadora", "secadora"))
 
         preferred_name = None
         if "lavadora" in text_n:
@@ -731,6 +739,28 @@ class ChatService:
             if len(raw_devices) > 1:
                 lines.append(f"(Total dispositivos: {len(raw_devices)})")
             return "\n".join(lines)
+
+        if asks_stop_cycle:
+            if not LGThinQService.can_query(db):
+                return "LG ThinQ no está configurado."
+            ok, msg = LGThinQService.stop_cycle(db=db)
+            return msg
+
+        if asks_start_cycle:
+            if not LGThinQService.can_query(db):
+                return "LG ThinQ no está configurado."
+            # Try to detect cycle type from text (normal, delicado, etc.)
+            cycle_type = "NORMAL"
+            if "delicado" in text_n or "delicate" in text_n:
+                cycle_type = "DELICATE"
+            elif "pesado" in text_n or "heavy" in text_n:
+                cycle_type = "HEAVY"
+            elif "rapido" in text_n or "rápido" in text_n or "quick" in text_n:
+                cycle_type = "QUICK"
+            elif "ecos" in text_n or "eco" in text_n:
+                cycle_type = "ECO"
+            ok, msg = LGThinQService.start_cycle(db=db, cycle_type=cycle_type)
+            return msg
 
         if asks_connect:
             return (

@@ -587,15 +587,59 @@ class LGThinQService:
 
         return False, selected, {}, last_detail
 
+    # Map LG state codes to human-friendly Spanish labels.
+    _STATE_TRANSLATIONS: dict[str, str] = {
+        "INITIAL": "Reposo",
+        "TUB_CLEAN": "Limpieza de tambor",
+        "DETECTING": "Detectando",
+        "PREWASH": "Prelavado",
+        "RINSING": "Enjuague",
+        "SPINNING": "Centrifugado",
+        "END": "Terminado",
+        "COOLING": "Enfriamiento",
+        "RESERVE": "Reserva",
+        "ERROR": "Error",
+        "RUN": "Ejecutando",
+        "WASHING": "Lavando",
+        "DRYING": "Secando",
+    }
+
+    @staticmethod
+    def _extract_scalar_value(val: any) -> str:
+        """Extract readable scalar value from LG ThinQ nested structure."""
+        if val is None or val == "" or val == [] or val == {}:
+            return ""
+        # If value is a dict with 'value' or '_value', extract it.
+        if isinstance(val, dict):
+            for key in ("value", "_value", "data"):
+                if key in val:
+                    inner = val[key]
+                    if isinstance(inner, dict):
+                        return LGThinQService._extract_scalar_value(inner)
+                    return str(inner).strip() if inner not in (None, "", []) else ""
+            # If dict has nested currentState or similar single char field, extract.
+            for inner_key, inner_val in val.items():
+                if inner_key not in LGThinQService._ENVELOPE_FIELDS:
+                    return LGThinQService._extract_scalar_value(inner_val)
+            return ""
+        return str(val).strip() if val not in (None, "") else ""
+
+    @staticmethod
+    def _translate_state(code: str) -> str:
+        """Translate LG state code to readable label."""
+        upper_code = str(code or "").upper().strip()
+        return LGThinQService._STATE_TRANSLATIONS.get(upper_code, code)
+
     @staticmethod
     def summarize_status(status: dict) -> list[str]:
         if not isinstance(status, dict):
             return []
 
         aliases = (
-            ("operation", "Operacion"),
+            ("operation", "Operación"),
             ("runState", "Estado"),
             ("state", "Estado"),
+            ("currentState", "Estado actual"),
             ("processState", "Proceso"),
             ("remainingTime", "Tiempo restante"),
             ("remainTimeMinute", "Minutos restantes"),
@@ -603,14 +647,20 @@ class LGThinQService:
             ("waterTemp", "Temperatura"),
             ("spinSpeed", "Centrifugado"),
             ("error", "Error"),
-            ("errorCode", "Codigo error"),
+            ("errorCode", "Código error"),
         )
 
         lines: list[str] = []
         for key, label in aliases:
-            value = status.get(key)
-            if value in (None, "", [], {}):
+            raw_value = status.get(key)
+            if raw_value in (None, "", [], {}):
                 continue
+            value = LGThinQService._extract_scalar_value(raw_value)
+            if not value:
+                continue
+            # Translate state codes to Spanish.
+            if key in ("operation", "runState", "state", "currentState", "processState"):
+                value = LGThinQService._translate_state(value)
             lines.append(f"- {label}: {value}")
 
         if lines:
@@ -620,11 +670,113 @@ class LGThinQService:
         for key, value in status.items():
             if key in LGThinQService._ENVELOPE_FIELDS:
                 continue
-            if isinstance(value, (dict, list)):
-                continue
-            if value in (None, ""):
-                continue
-            lines.append(f"- {key}: {value}")
-            if len(lines) >= 8:
-                break
+            scalar = LGThinQService._extract_scalar_value(value)
+            if scalar:
+                lines.append(f"- {key}: {scalar}")
+                if len(lines) >= 8:
+                    break
         return lines
+
+    @staticmethod
+    def start_cycle(db: Session | None = None, device_id: str | None = None, cycle_type: str = "NORMAL") -> tuple[bool, str]:
+        """Start a wash/dry cycle. cycle_type examples: NORMAL, DELICATE, HEAVY, QUICK, etc."""
+        base_url = LGThinQService._base_url()
+        pat = LGThinQService._api_pat()
+        if not base_url or not pat:
+            return False, "LG ThinQ no está configurado."
+
+        if not device_id:
+            # If no device specified, try to find the first one.
+            ok, devices, _ = LGThinQService.list_devices(db)
+            if not devices:
+                return False, "No encontré dispositivos LG ThinQ."
+            device_id = str(devices[0].get("id", "")).strip()
+
+        command_path = f"/devices/{urllib.parse.quote(device_id)}/control"
+        payload = {
+            "command": "START",
+            "cycle": str(cycle_type or "NORMAL").upper(),
+        }
+        payload_json = json.dumps(payload)
+
+        for country in LGThinQService._country_candidates():
+            request = urllib.request.Request(
+                f"{base_url}{command_path}",
+                data=payload_json.encode("utf-8"),
+                method="POST",
+            )
+            request.add_header("Authorization", f"Bearer {pat}")
+            request.add_header("Accept", "application/json")
+            request.add_header("Content-Type", "application/json")
+            request.add_header("x-message-id", LGThinQService._message_id())
+            request.add_header("x-country", country)
+            request.add_header("x-client-id", LGThinQService._client_id())
+            request.add_header("x-api-key", LGThinQService._api_key())
+            request.add_header("x-service-phase", "OP")
+            try:
+                with urllib.request.urlopen(request, timeout=20) as response:
+                    response.read()
+                    return True, f"Ciclo {cycle_type.upper()} iniciado en SujiLavadora."
+            except urllib.error.HTTPError as exc:
+                body = ""
+                try:
+                    body = exc.read().decode("utf-8", errors="replace")[:300]
+                except Exception:
+                    pass
+                if exc.code == 401:
+                    continue
+                return False, f"No se pudo iniciar el ciclo. HTTP {exc.code}: {body}".strip()
+            except Exception as exc:
+                return False, f"Error al iniciar ciclo: {exc}"
+
+        return False, "No se pudo iniciar el ciclo (intente todos los países)."
+
+    @staticmethod
+    def stop_cycle(db: Session | None = None, device_id: str | None = None) -> tuple[bool, str]:
+        """Stop the current wash/dry cycle."""
+        base_url = LGThinQService._base_url()
+        pat = LGThinQService._api_pat()
+        if not base_url or not pat:
+            return False, "LG ThinQ no está configurado."
+
+        if not device_id:
+            ok, devices, _ = LGThinQService.list_devices(db)
+            if not devices:
+                return False, "No encontré dispositivos LG ThinQ."
+            device_id = str(devices[0].get("id", "")).strip()
+
+        command_path = f"/devices/{urllib.parse.quote(device_id)}/control"
+        payload = {"command": "STOP"}
+        payload_json = json.dumps(payload)
+
+        for country in LGThinQService._country_candidates():
+            request = urllib.request.Request(
+                f"{base_url}{command_path}",
+                data=payload_json.encode("utf-8"),
+                method="POST",
+            )
+            request.add_header("Authorization", f"Bearer {pat}")
+            request.add_header("Accept", "application/json")
+            request.add_header("Content-Type", "application/json")
+            request.add_header("x-message-id", LGThinQService._message_id())
+            request.add_header("x-country", country)
+            request.add_header("x-client-id", LGThinQService._client_id())
+            request.add_header("x-api-key", LGThinQService._api_key())
+            request.add_header("x-service-phase", "OP")
+            try:
+                with urllib.request.urlopen(request, timeout=20) as response:
+                    response.read()
+                    return True, "Ciclo detenido."
+            except urllib.error.HTTPError as exc:
+                body = ""
+                try:
+                    body = exc.read().decode("utf-8", errors="replace")[:300]
+                except Exception:
+                    pass
+                if exc.code == 401:
+                    continue
+                return False, f"No se pudo detener el ciclo. HTTP {exc.code}: {body}".strip()
+            except Exception as exc:
+                return False, f"Error al detener ciclo: {exc}"
+
+        return False, "No se pudo detener el ciclo (intente todos los países)."

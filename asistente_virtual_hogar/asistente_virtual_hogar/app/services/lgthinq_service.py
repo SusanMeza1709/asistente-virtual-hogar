@@ -1,5 +1,6 @@
 import json
 import os
+import uuid
 from datetime import datetime
 import urllib.parse
 import urllib.request
@@ -25,6 +26,14 @@ class LGThinQService:
     @staticmethod
     def _api_pat() -> str:
         return (os.getenv("LGTHINQ_API_PAT") or "").strip()
+
+    @staticmethod
+    def _country_code() -> str:
+        return (os.getenv("LGTHINQ_COUNTRY_CODE") or "US").strip()
+
+    @staticmethod
+    def _language_code() -> str:
+        return (os.getenv("LGTHINQ_LANGUAGE_CODE") or "en-US").strip()
 
     @staticmethod
     def can_query(db: Session | None = None) -> bool:
@@ -249,6 +258,12 @@ class LGThinQService:
         request = urllib.request.Request(url, method="GET")
         request.add_header("Authorization", f"Bearer {pat}")
         request.add_header("Accept", "application/json")
+        request.add_header("Content-Type", "application/json")
+        request.add_header("x-message-id", str(uuid.uuid4()).replace("-", "")[:22])
+        request.add_header("x-country-code", LGThinQService._country_code())
+        request.add_header("x-language-code", LGThinQService._language_code())
+        request.add_header("x-service-phase", "OP")
+        request.add_header("x-client-id", "thinq_app")
 
         try:
             with urllib.request.urlopen(request, timeout=20) as response:
@@ -257,6 +272,13 @@ class LGThinQService:
                     return True, {}, "OK"
                 parsed = json.loads(payload)
                 return True, parsed, "OK"
+        except urllib.error.HTTPError as exc:
+            body = ""
+            try:
+                body = exc.read().decode("utf-8", errors="replace")[:300]
+            except Exception:
+                pass
+            return False, None, f"HTTP {exc.code}: {exc.reason}. {body}".strip()
         except Exception as exc:
             return False, None, f"No se pudo consultar LG ThinQ: {exc}"
 
@@ -303,7 +325,12 @@ class LGThinQService:
 
     @staticmethod
     def list_devices(db: Session | None = None) -> tuple[bool, list[dict], str]:
-        paths = ("/service/devices", "/devices")
+        paths = (
+            "/v1/service/users/devices",
+            "/service/users/devices",
+            "/service/devices",
+            "/devices",
+        )
         last_detail = "No se pudo obtener la lista de dispositivos de LG ThinQ."
 
         for path in paths:

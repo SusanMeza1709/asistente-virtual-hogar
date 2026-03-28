@@ -664,7 +664,7 @@ class ChatService:
         # One-to-one mapping for WD9PVC4S6 internal backend cycle names.
         cycle_aliases = (
             ("ALGODON", ("algodon", "algodón", "cotton", "normal")),
-            ("ECO_40_60", ("eco 40-60", "eco 40 60", "eco40-60", "eco 40/60", "eco40/60", "eco cuarenta sesenta")),
+            ("ECO_40_60", ("eco 40-60", "eco 40 60", "eco40-60", "eco 40/60", "eco40/60", "eco cuarenta sesenta", "eco cuarenta a sesenta", "eco cuarenta guion sesenta", "eco 4060")),
             ("TURBOWASH_59", ("turbowash 59", "turbo 59")),
             ("MIXTOS", ("mixtos", "mixto", "mezcla", "mixed")),
             ("SINTETICO", ("sintetico", "sintético", "sinteticos", "sintéticos")),
@@ -684,16 +684,16 @@ class ChatService:
             ("SECADO_PLANCHADO", ("planchado", "secado planchado")),
             ("SECADO_TEMPERATURA_BAJA", ("temperatura baja", "secado temperatura baja", "secado suave")),
             ("SECADO_NORMAL_ECO", ("normal eco", "secado eco")),
-            ("ROPA_DE_CAMA", ("ropa de cama", "cama", "bedding")),
-            ("CENTRIFUGADO", ("centrifugado", "solo centrifugado", "centrifugar")),
-            ("CUIDADO_DEL_BEBE", ("cuidado del bebe", "cuidado del bebé", "bebe", "bebé")),
-            ("DESODORIZACION", ("desodorizacion", "desodorización", "desodorizar")),
+            ("ROPA_DE_CAMA", ("ropa de cama", "ropa decama", "ropa d cama", "cama", "bedding")),
+            ("CENTRIFUGADO", ("centrifugado", "centrifugao", "centrifugad", "solo centrifugado", "solo sifrugado", "centrifugar")),
+            ("CUIDADO_DEL_BEBE", ("cuidado del bebe", "cuidado del bebé", "cuidado bebe", "cuidado del bb", "bebe", "bebé")),
+            ("DESODORIZACION", ("desodorizacion", "desodorización", "desodorisacion", "desodorisación", "desodorisacion", "desodorizar")),
             ("JEANS", ("jeans", "mezclilla", "denim")),
-            ("LENCERIA", ("lenceria", "lencería", "ropa interior delicada")),
-            ("MANCHA_DE_SUDOR", ("mancha de sudor", "manchas de sudor", "sudor")),
-            ("MANCHAS_DE_COMIDA_Y_JUGO", ("manchas de comida y jugo", "mancha de comida", "mancha de jugo", "comida y jugo")),
-            ("TEMPORADA_DE_LLUVIAS", ("temporada de lluvias", "lluvias", "epoca de lluvias", "época de lluvias")),
-            ("VACIAR", ("vaciar", "drenar", "desaguar", "vaciado")),
+            ("LENCERIA", ("lenceria", "lencería", "linceria", "linseria", "lenseria", "ropa interior delicada")),
+            ("MANCHA_DE_SUDOR", ("mancha de sudor", "manchas de sudor", "mancha sudor", "sudor")),
+            ("MANCHAS_DE_COMIDA_Y_JUGO", ("manchas de comida y jugo", "manchas de comida", "mancha de comida", "mancha comida", "mancha de jugo", "comida y jugo", "comida jugo")),
+            ("TEMPORADA_DE_LLUVIAS", ("temporada de lluvias", "temporada lluvias", "temprada de lluvias", "temporada de lluvias", "lluvias", "epoca de lluvias", "época de lluvias")),
+            ("VACIAR", ("vaciar", "vasiar", "vasiar", "drenar", "desaguar", "vaciado")),
         )
         for code, hints in cycle_aliases:
             if ChatService._contains_any(text_n, hints):

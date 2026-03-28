@@ -486,19 +486,55 @@ class LGThinQService:
 
         return devices[0]
 
+    # Fields that belong to the API envelope, not the device state.
+    _ENVELOPE_FIELDS = frozenset({
+        "messageId", "timestamp", "resultCode", "result", "code",
+        "message", "traceId", "requestId",
+    })
+    # Fields that indicate we are looking at real device state.
+    _STATE_HINT_FIELDS = frozenset({
+        "runState", "state", "operation", "processState",
+        "remainingTime", "remainTimeMinute", "course",
+        "waterTemp", "spinSpeed", "error", "errorCode",
+        "currentState", "onlineStatus", "powerState",
+    })
+
     @staticmethod
-    def _extract_status_map(payload: dict | list | None) -> dict:
-        if isinstance(payload, dict):
-            for key in ("status", "data", "result", "item", "snapshot"):
-                value = payload.get(key)
-                if isinstance(value, dict):
-                    return value
-            return payload
+    def _extract_status_map(payload: dict | list | None, _depth: int = 0) -> dict:
+        if _depth > 6:
+            return {}
         if isinstance(payload, list):
             for item in payload:
                 if isinstance(item, dict):
-                    return item
-        return {}
+                    found = LGThinQService._extract_status_map(item, _depth + 1)
+                    if found:
+                        return found
+            return {}
+        if not isinstance(payload, dict):
+            return {}
+        # If this dict already contains real state keys, return it directly.
+        if any(k in payload for k in LGThinQService._STATE_HINT_FIELDS):
+            return payload
+        # Dig into known wrapper keys first (ordered by likelihood).
+        for key in ("status", "body", "data", "response", "item", "snapshot", "result", "property"):
+            value = payload.get(key)
+            if isinstance(value, dict):
+                found = LGThinQService._extract_status_map(value, _depth + 1)
+                if found:
+                    return found
+            elif isinstance(value, list):
+                found = LGThinQService._extract_status_map(value, _depth + 1)
+                if found:
+                    return found
+        # Last resort: recurse into any non-envelope dict value.
+        for key, value in payload.items():
+            if key in LGThinQService._ENVELOPE_FIELDS:
+                continue
+            if isinstance(value, (dict, list)) and value:
+                found = LGThinQService._extract_status_map(value, _depth + 1)
+                if found:
+                    return found
+        return payload
 
     @staticmethod
     def get_device_status(db: Session | None = None, preferred_name: str | None = None) -> tuple[bool, dict | None, dict, str]:
@@ -565,13 +601,15 @@ class LGThinQService:
         if lines:
             return lines
 
-        # Generic fallback in case provider uses custom keys.
+        # Generic fallback: show any scalar field that is not envelope noise.
         for key, value in status.items():
+            if key in LGThinQService._ENVELOPE_FIELDS:
+                continue
             if isinstance(value, (dict, list)):
                 continue
             if value in (None, ""):
                 continue
             lines.append(f"- {key}: {value}")
-            if len(lines) >= 6:
+            if len(lines) >= 8:
                 break
         return lines

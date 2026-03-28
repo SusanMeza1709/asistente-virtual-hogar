@@ -1,6 +1,7 @@
 import os
 import re
 import random
+import logging
 import unicodedata
 from datetime import datetime
 from difflib import SequenceMatcher, get_close_matches
@@ -24,6 +25,7 @@ from app.services.whatsapp_service import WhatsAppService
 # Pending-action state (single-user home assistant — in-memory is fine)
 # ---------------------------------------------------------------------------
 _PENDING: dict = {}
+logger = logging.getLogger(__name__)
 
 
 class ChatService:
@@ -661,6 +663,16 @@ class ChatService:
 
     @staticmethod
     def _detect_lg_cycle_type(text_n: str) -> str:
+        def _log_cycle_selection(source: str, code: str, alias: str | None = None, score: float | None = None) -> None:
+            payload = {
+                "source": source,
+                "selected_cycle": code,
+                "alias": alias or "",
+                "score": round(score or 0.0, 4),
+                "text": text_n,
+            }
+            logger.info("[LG_CYCLE_MATCH] %s", payload)
+
         def _phonetic_key(raw: str) -> str:
             value = ChatService._normalize(raw)
             value = value.replace("ll", "y")
@@ -713,6 +725,8 @@ class ChatService:
 
         for code, hints in cycle_aliases:
             if ChatService._contains_any(text_n, hints):
+                matched = next((str(h) for h in hints if ChatService._contains_any(text_n, (h,))), "")
+                _log_cycle_selection("contains_any", code, alias=matched)
                 return code
 
         # Extra tolerance for voice transcription drift: compare phonetic keys.
@@ -723,8 +737,10 @@ class ChatService:
                 hint_n = ChatService._normalize(str(hint))
                 hint_p = _phonetic_key(str(hint))
                 if hint_n and hint_n in normalized_text:
+                    _log_cycle_selection("normalized_contains", code, alias=str(hint))
                     return code
                 if hint_p and hint_p in phonetic_text:
+                    _log_cycle_selection("phonetic_contains", code, alias=str(hint))
                     return code
                 n_score = SequenceMatcher(None, normalized_text, hint_n).ratio() if hint_n else 0.0
                 p_score = SequenceMatcher(None, phonetic_text, hint_p).ratio() if hint_p else 0.0
@@ -735,6 +751,7 @@ class ChatService:
 
         # Threshold tuned to avoid accidental matches with unrelated phrases.
         if best_code and best_score >= 0.80:
+            _log_cycle_selection("fuzzy", best_code, score=best_score)
             return best_code
 
         explicit_cycle = re.search(
@@ -750,9 +767,11 @@ class ChatService:
             if normalized and normalized not in stop_words:
                 for code, hints in cycle_aliases:
                     if any(ChatService._normalize(str(h)) == normalized for h in hints):
+                        _log_cycle_selection("explicit_cycle", code, alias=normalized)
                         return code
 
         # Safe default for this model when no explicit cycle was recognized.
+        _log_cycle_selection("default", "ALGODON")
         return "ALGODON"
 
     @staticmethod

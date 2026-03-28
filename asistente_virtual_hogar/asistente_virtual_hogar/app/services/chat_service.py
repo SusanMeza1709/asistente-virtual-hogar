@@ -660,10 +660,52 @@ class ChatService:
         return f"Listo. Guardé tu WhatsApp de destino: +{phone}."
 
     @staticmethod
+    def _detect_lg_cycle_type(text_n: str) -> str:
+        cycle_aliases = (
+            ("DELICATE", ("delicado", "delicada", "ropa delicada", "delicate")),
+            ("QUICK", ("rapido", "rápido", "express", "express", "corto", "quick")),
+            ("ECO", ("eco", "ahorro", "economico", "económico")),
+            ("HEAVY", ("pesado", "pesada", "heavy", "intenso", "intensivo")),
+            ("COTTON", ("algodon", "algodón", "cotton")),
+            ("MIX", ("mixto", "mezcla", "mixed")),
+            ("RINSE_SPIN", ("enjuague centrifugado", "enjuague y centrifugado", "rinse spin")),
+            ("SPIN_ONLY", ("solo centrifugado", "solo centrifugar", "centrifugado", "spin")),
+            ("TUB_CLEAN", ("limpieza de tambor", "limpiar tambor", "tub clean", "autolimpieza")),
+            ("WOOL", ("lana", "wool")),
+            ("BEDDING", ("edredon", "edredón", "ropa de cama", "bedding")),
+            ("BABY_CARE", ("bebe", "bebé", "cuidado de bebe", "baby care")),
+            ("SPORTSWEAR", ("deporte", "ropa deportiva", "sportswear")),
+        )
+        for code, hints in cycle_aliases:
+            if ChatService._contains_any(text_n, hints):
+                return code
+
+        explicit_cycle = re.search(
+            r"(?:ciclo|programa|lavado)\s+(?:de\s+)?(?P<name>[\w\sáéíóúñ-]{3,40})",
+            text_n,
+        )
+        if explicit_cycle:
+            cycle_name = explicit_cycle.group("name")
+            cycle_name = re.sub(r"\b(lg|thinq|lavadora|secadora|ahora|ya|por\s+favor)\b", " ", cycle_name)
+            cycle_name = re.sub(r"\s+", " ", cycle_name).strip(" .,-")
+            if cycle_name and cycle_name not in {"la", "el", "mi", "tu"}:
+                return re.sub(r"\s+", "_", ChatService._normalize(cycle_name)).upper()
+
+        return "NORMAL"
+
+    @staticmethod
     def _try_lgthinq_status(db: Session, text_n: str) -> str | None:
         hints_match = ChatService._contains_any(text_n, ChatService.LGTHINQ_HINTS)
         contains_lg = bool(re.search(r"\blg\b", text_n))
         contains_thinq = "thinq" in text_n
+        asks_cycle_control = ChatService._contains_any(
+            text_n,
+            (
+                "inicia", "iniciar", "empieza", "empezar", "comienza", "comenzar",
+                "arranca", "arrancar", "ejecuta", "ejecutar", "deten", "detén", "detener",
+                "detenla", "detenlo", "para", "apaga", "pausa", "reanuda", "resume",
+            ),
+        ) and ChatService._contains_any(text_n, ("lavadora", "secadora", "ciclo", "lavado", "programa"))
         asks_appliance_status = ChatService._contains_any(
             text_n,
             (
@@ -676,7 +718,7 @@ class ChatService:
             ),
         ) and ChatService._contains_any(text_n, ("estado", "status", "como va", "cómo va"))
 
-        if not (hints_match or contains_lg or contains_thinq or asks_appliance_status):
+        if not (hints_match or contains_lg or contains_thinq or asks_appliance_status or asks_cycle_control):
             return None
 
         asks_setup = ChatService._contains_any(
@@ -709,12 +751,19 @@ class ChatService:
         )
         asks_start_cycle = ChatService._contains_any(
             text_n,
-            ("inicia", "empieza", "comenzar", "arranca", "poner en marcha", "activa el ciclo"),
-        ) and ChatService._contains_any(text_n, ("lg", "thinq", "lavadora", "secadora"))
+            (
+                "inicia", "iniciar", "empieza", "empezar", "comenzar", "comienza",
+                "arranca", "arrancar", "poner en marcha", "pon en marcha", "activa el ciclo",
+                "ejecuta", "ejecutar", "corre ciclo",
+            ),
+        ) and ChatService._contains_any(text_n, ("lg", "thinq", "lavadora", "secadora", "ciclo", "lavado", "programa"))
         asks_stop_cycle = ChatService._contains_any(
             text_n,
-            ("detén", "detente", "para", "paraaaaa", "detener", "apaga", "quitar", "cancela"),
-        ) and ChatService._contains_any(text_n, ("lg", "thinq", "lavadora", "secadora"))
+            (
+                "detén", "deten", "detente", "para", "detener", "apaga", "quitar",
+                "cancela", "pausa", "frena", "stop",
+            ),
+        ) and ChatService._contains_any(text_n, ("lg", "thinq", "lavadora", "secadora", "ciclo", "lavado", "programa"))
 
         preferred_name = None
         if "lavadora" in text_n:
@@ -749,16 +798,7 @@ class ChatService:
         if asks_start_cycle:
             if not LGThinQService.can_query(db):
                 return "LG ThinQ no está configurado."
-            # Try to detect cycle type from text (normal, delicado, etc.)
-            cycle_type = "NORMAL"
-            if "delicado" in text_n or "delicate" in text_n:
-                cycle_type = "DELICATE"
-            elif "pesado" in text_n or "heavy" in text_n:
-                cycle_type = "HEAVY"
-            elif "rapido" in text_n or "rápido" in text_n or "quick" in text_n:
-                cycle_type = "QUICK"
-            elif "ecos" in text_n or "eco" in text_n:
-                cycle_type = "ECO"
+            cycle_type = ChatService._detect_lg_cycle_type(text_n)
             ok, msg = LGThinQService.start_cycle(db=db, cycle_type=cycle_type)
             return msg
 

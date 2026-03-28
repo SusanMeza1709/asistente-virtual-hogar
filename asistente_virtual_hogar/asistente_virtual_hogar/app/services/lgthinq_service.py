@@ -724,7 +724,8 @@ class LGThinQService:
         if not ok or not status_dict:
             return False, "No pude verificar el estado de la lavadora."
         
-        current_state = status_dict.get("currentState", "UNKNOWN").upper()
+        current_state_raw = status_dict.get("currentState", status_dict.get("runState", status_dict.get("state", "UNKNOWN")))
+        current_state = LGThinQService._extract_scalar_value(current_state_raw).upper() or "UNKNOWN"
         
         # Check if device is in a controllable state
         if current_state in LGThinQService._UNCONTROLLABLE_STATES:

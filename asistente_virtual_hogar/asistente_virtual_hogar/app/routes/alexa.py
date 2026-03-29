@@ -19,6 +19,8 @@ def _command_from_intent_name(intent_name: str) -> str:
         "consumointent": "alerta de consumo",
         "alertasintent": "alerta de consumo",
         "estadolavadoraintent": "estado de mi lavadora lg",
+        "iniciarciclodelicadointent": "inicia ciclo delicado en la lavadora lg",
+        "iniciarciclointent": "inicia ciclo en la lavadora lg",
     }
     if normalized in direct_map:
         return direct_map[normalized]
@@ -32,6 +34,10 @@ def _command_from_intent_name(intent_name: str) -> str:
         return "alerta de consumo"
     if "lavadora" in normalized and "estado" in normalized:
         return "estado de mi lavadora lg"
+    if "lavadora" in normalized and "ciclo" in normalized and "delicado" in normalized:
+        return "inicia ciclo delicado en la lavadora lg"
+    if "lavadora" in normalized and "ciclo" in normalized:
+        return "inicia ciclo en la lavadora lg"
     return ""
 
 

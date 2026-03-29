@@ -1963,10 +1963,18 @@ class ChatService:
                         if current_course:
                             break
 
-                if current_course and ChatService._normalize(current_course) != ChatService._normalize(cycle_label):
+                requested_is_special_cycle = ChatService._normalize(cycle_type) not in ("", "algodon")
+                differs_from_panel = bool(
+                    current_course and ChatService._normalize(current_course) != ChatService._normalize(cycle_label)
+                )
+
+                # Some models do not expose current selected course in status.
+                # For special cycles, enforce Remote Start guidance even when panel cycle is unknown.
+                if differs_from_panel or (requested_is_special_cycle and not current_course):
+                    panel_label = current_course or "el ciclo del panel manual"
                     return (
                         f"Activaste un ciclo diferente al manual. "
-                        f"El panel está en {current_course} y pediste {cycle_label}. "
+                        f"El panel está en {panel_label} y pediste {cycle_label}. "
                         f"Activa Inicio Remoto; así se selecciona el ciclo {cycle_label}. "
                         "Cuando esté activo, responde sí otra vez."
                     )

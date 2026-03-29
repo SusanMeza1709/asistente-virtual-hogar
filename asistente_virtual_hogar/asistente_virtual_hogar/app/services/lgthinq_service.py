@@ -129,18 +129,64 @@ class LGConsumerAuth:
 
     @staticmethod
     def get_gateway(country: str) -> tuple[bool, dict, str]:
-        """Fetch country-specific gateway URLs from LG route service."""
-        ok, data, detail = LGConsumerAuth._do_request(
-            LGConsumerAuth._GATEWAY_URL, country=country
-        )
-        if not ok:
-            return False, {}, detail
-        result = data.get("result") or data
-        emp_base = (result.get("empSpxUri") or result.get("empTermsUri") or "").rstrip("/")
-        thinq2_uri = (result.get("thinq2Uri") or "").rstrip("/")
-        if not emp_base:
-            return False, {}, f"Gateway no devolvió empSpxUri: {json.dumps(result)[:300]}"
-        return True, {"empBase": emp_base, "thinq2Uri": thinq2_uri, "raw": result}, "OK"
+        """Fetch country-specific gateway URLs from LG route service.
+
+        LG may require different request shapes by region/account, so try a few
+        known variants before failing.
+        """
+        country = (country or "PE").upper()
+        lang_candidates = ["es-419", "es-PE", "en-US"]
+        url_candidates: list[str] = [
+            LGConsumerAuth._GATEWAY_URL,
+            f"{LGConsumerAuth._GATEWAY_URL}?countryCode={country}&langCode=es-419",
+            f"{LGConsumerAuth._GATEWAY_URL}?countryCode={country}&langCode=en-US",
+        ]
+
+        last_detail = ""
+        for url in url_candidates:
+            for lang in lang_candidates:
+                headers = {
+                    "Accept": "application/json",
+                    "x-api-key": LGThinQService._api_key(),
+                    "x-client-id": LGConsumerAuth._APP_CLIENT_ID,
+                    "x-country-code": country,
+                    "x-language-code": lang,
+                    "x-message-id": LGConsumerAuth._msg_id(),
+                    "x-service-phase": "OP",
+                    "x-thinq-app-level": "PRD",
+                    "x-thinq-app-os": "ANDROID",
+                    "x-thinq-app-type": "NUTS",
+                    "x-thinq-app-ver": LGConsumerAuth._APP_VER,
+                }
+                req = urllib.request.Request(url, method="GET")
+                for k, v in headers.items():
+                    req.add_header(k, v)
+                try:
+                    with urllib.request.urlopen(req, timeout=20) as resp:
+                        raw = resp.read().decode("utf-8", errors="replace")
+                        data = json.loads(raw) if raw.strip() else {}
+                        result = data.get("result") if isinstance(data, dict) else {}
+                        if isinstance(result, str):
+                            # Some error payloads put empty string in result.
+                            result = {}
+                        if not isinstance(result, dict):
+                            result = data if isinstance(data, dict) else {}
+                        emp_base = (result.get("empSpxUri") or result.get("empTermsUri") or "").rstrip("/")
+                        thinq2_uri = (result.get("thinq2Uri") or "").rstrip("/")
+                        if emp_base:
+                            return True, {"empBase": emp_base, "thinq2Uri": thinq2_uri, "raw": result}, "OK"
+                        last_detail = f"Gateway sin empSpxUri: {json.dumps(result)[:240]}"
+                except urllib.error.HTTPError as exc:
+                    body_text = ""
+                    try:
+                        body_text = exc.read().decode("utf-8", errors="replace")[:240]
+                    except Exception:
+                        pass
+                    last_detail = f"HTTP {exc.code}: {body_text}"
+                except Exception as exc:
+                    last_detail = str(exc)
+
+        return False, {}, f"Gateway error: {last_detail or 'sin respuesta válida'}"
 
     @staticmethod
     def _login(emp_base: str, country: str, username: str, password: str) -> tuple[bool, dict, str]:
@@ -1114,7 +1160,14 @@ class LGThinQService:
         # If consumer credentials are configured, use the full app-level API
         # which supports cycle selection (unlike the PAT B2B API).
         if LGConsumerAuth.available():
-            return LGConsumerAuth.start_cycle_consumer(db, device_id, cycle_upper, cycle_name)
+            ok_consumer, msg_consumer = LGConsumerAuth.start_cycle_consumer(db, device_id, cycle_upper, cycle_name)
+            if ok_consumer:
+                return True, msg_consumer
+            # Do not block appliance control if consumer auth fails; fallback to PAT flow.
+            # This keeps the previous behavior while we keep tuning consumer auth.
+            consumer_error = msg_consumer
+        else:
+            consumer_error = ""
 
 
         # Per LG OpenAPI spec: washer command structure requires location + operation + course/cycle fields
@@ -1172,6 +1225,8 @@ class LGThinQService:
                     break
 
         if last_error:
+            if consumer_error:
+                return False, f"No se pudo iniciar el ciclo. Consumer: {consumer_error}. PAT: {last_error}"
             return False, f"No se pudo iniciar el ciclo. {last_error}"
         return False, "No se pudo iniciar el ciclo (probé todos los formatos)."
 

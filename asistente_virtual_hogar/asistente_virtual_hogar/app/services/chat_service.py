@@ -1942,6 +1942,35 @@ class ChatService:
             if action == "lg_start_cycle":
                 cycle_type = str(pending.get("cycle_type") or "ALGODON").strip()
                 cycle_label = str(pending.get("cycle_label") or ChatService._lg_cycle_display_name(cycle_type)).strip()
+
+                # If the panel-selected cycle differs from requested cycle, guide user to
+                # enable Remote Start first so the app/voice-selected cycle can apply.
+                ok_status, _, status_dict, _ = LGThinQService.get_device_status(db)
+                current_course = ""
+                if ok_status and status_dict:
+                    for key in (
+                        "courseName",
+                        "course",
+                        "currentCourse",
+                        "selectedCourse",
+                        "apCourseName",
+                        "apCourse",
+                    ):
+                        raw_value = status_dict.get(key)
+                        if raw_value in (None, "", [], {}):
+                            continue
+                        current_course = LGThinQService._extract_scalar_value(raw_value).strip()
+                        if current_course:
+                            break
+
+                if current_course and ChatService._normalize(current_course) != ChatService._normalize(cycle_label):
+                    return (
+                        f"Activaste un ciclo diferente al manual. "
+                        f"El panel está en {current_course} y pediste {cycle_label}. "
+                        f"Activa Inicio Remoto; así se selecciona el ciclo {cycle_label}. "
+                        "Cuando esté activo, responde sí otra vez."
+                    )
+
                 _clear_pending_state()
                 ok, msg = LGThinQService.start_cycle(db=db, cycle_type=cycle_type)
                 if ok:

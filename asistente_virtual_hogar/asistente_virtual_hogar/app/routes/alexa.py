@@ -7,6 +7,34 @@ from app.services.chat_service import ChatService
 router = APIRouter(prefix="/alexa", tags=["Alexa"])
 
 
+def _command_from_intent_name(intent_name: str) -> str:
+    normalized = (intent_name or "").strip().lower()
+    if not normalized:
+        return ""
+
+    direct_map = {
+        "inventariointent": "inventario",
+        "comprasintent": "lista de compras",
+        "resumencomprasintent": "resumen de compras",
+        "consumointent": "alerta de consumo",
+        "alertasintent": "alerta de consumo",
+        "estadolavadoraintent": "estado de mi lavadora lg",
+    }
+    if normalized in direct_map:
+        return direct_map[normalized]
+
+    # If user creates custom intent names, infer a useful command from keywords.
+    if "inventario" in normalized:
+        return "inventario"
+    if "compra" in normalized:
+        return "lista de compras"
+    if "consumo" in normalized or "alerta" in normalized:
+        return "alerta de consumo"
+    if "lavadora" in normalized and "estado" in normalized:
+        return "estado de mi lavadora lg"
+    return ""
+
+
 def _extract_command_text(payload: dict) -> str:
     request_data = payload.get("request") or {}
     intent_data = request_data.get("intent") or {}
@@ -83,8 +111,11 @@ async def alexa_webhook(request: Request, db: Session = Depends(get_db)):
 
     command_text = _extract_command_text(payload)
     if not command_text:
+        command_text = _command_from_intent_name(intent_name)
+
+    if not command_text:
         return _alexa_response(
-            "No detecté el comando. Configura un slot de texto en tu intent de Alexa."
+            "No detecte el comando. Puedes decir: quiero inventario, necesito ver compras o dime el estado de mi lavadora LG."
         )
 
     try:

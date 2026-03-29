@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import uuid
@@ -14,8 +15,327 @@ from app.services.memory_service import MemoryService
 from app.services.whatsapp_service import WhatsAppService
 
 
+def _deep_get(d: dict, *keys: str):
+    """Safely navigate nested dicts; returns empty string if any key is missing."""
+    for key in keys:
+        if not isinstance(d, dict):
+            return ""
+        d = d.get(key) or {}
+    return d if isinstance(d, str) else ""
+
+
+def _load_json_memory_safe(db, key: str) -> dict:
+    """Load JSON from memory without class dependency (for LGConsumerAuth)."""
+    try:
+        item = MemoryService.get_by_key(db, key)
+        if not item or not item.value.strip():
+            return {}
+        parsed = json.loads(item.value)
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        return {}
+
+
+class LGConsumerAuth:
+    """LG ThinQ consumer authentication using email + password.
+
+    Uses the same API as the official LG ThinQ app, which supports full device
+    control including cycle (course) selection.
+
+    Required env vars:
+        LGTHINQ_USERNAME  – LG account email
+        LGTHINQ_PASSWORD  – LG account password
+    Optional:
+        LGTHINQ_CONSUMER_COUNTRY – country code (defaults to LGTHINQ_COUNTRY_CODE or PE)
+    """
+
+    _GATEWAY_URL = "https://route.lgthinq.com:46030/v1/service/application/gateway-uri"
+    _APP_CLIENT_ID = "LGAO221APPLICATION"
+    _APP_VER = "3.6.1200"
+    _TOKEN_DB_KEY = "__lgthinq_consumer_token__"
+
+    @staticmethod
+    def _username() -> str:
+        return (os.getenv("LGTHINQ_USERNAME") or "").strip()
+
+    @staticmethod
+    def _password() -> str:
+        return (os.getenv("LGTHINQ_PASSWORD") or "").strip()
+
+    @staticmethod
+    def _country() -> str:
+        return (
+            os.getenv("LGTHINQ_CONSUMER_COUNTRY")
+            or os.getenv("LGTHINQ_COUNTRY_CODE")
+            or "PE"
+        ).strip().upper()
+
+    @staticmethod
+    def available() -> bool:
+        return bool(LGConsumerAuth._username() and LGConsumerAuth._password())
+
+    @staticmethod
+    def _msg_id() -> str:
+        return base64.urlsafe_b64encode(uuid.uuid4().bytes).decode("ascii").rstrip("=")
+
+    @staticmethod
+    def _base_headers(country: str) -> dict:
+        return {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "x-api-key": (os.getenv("LGTHINQ_API_KEY") or "v6GFvkweNo7DK7yD3ylIZ9w52aKBU0eJ7wLXkSR3").strip(),
+            "x-client-id": LGConsumerAuth._APP_CLIENT_ID,
+            "x-country-code": country,
+            "x-language-code": "es-419",
+            "x-message-id": LGConsumerAuth._msg_id(),
+            "x-service-code": "SVC202",
+            "x-service-phase": "OP",
+            "x-thinq-app-level": "PRD",
+            "x-thinq-app-os": "ANDROID",
+            "x-thinq-app-type": "NUTS",
+            "x-thinq-app-ver": LGConsumerAuth._APP_VER,
+        }
+
+    @staticmethod
+    def _do_request(
+        url: str,
+        *,
+        method: str = "GET",
+        body: dict | None = None,
+        extra_headers: dict | None = None,
+        country: str | None = None,
+    ) -> tuple[bool, dict, str]:
+        hdrs = LGConsumerAuth._base_headers(country or LGConsumerAuth._country())
+        if extra_headers:
+            hdrs.update(extra_headers)
+        data = json.dumps(body).encode("utf-8") if body else None
+        req = urllib.request.Request(url, data=data, method=method)
+        for k, v in hdrs.items():
+            req.add_header(k, v)
+        try:
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                payload = resp.read().decode("utf-8", errors="replace")
+                parsed = json.loads(payload) if payload.strip() else {}
+                return True, parsed if isinstance(parsed, dict) else {"raw": parsed}, "OK"
+        except urllib.error.HTTPError as exc:
+            body_text = ""
+            try:
+                body_text = exc.read().decode("utf-8", errors="replace")[:400]
+            except Exception:
+                pass
+            return False, {}, f"HTTP {exc.code}: {body_text}"
+        except Exception as exc:
+            return False, {}, str(exc)
+
+    @staticmethod
+    def get_gateway(country: str) -> tuple[bool, dict, str]:
+        """Fetch country-specific gateway URLs from LG route service."""
+        ok, data, detail = LGConsumerAuth._do_request(
+            LGConsumerAuth._GATEWAY_URL, country=country
+        )
+        if not ok:
+            return False, {}, detail
+        result = data.get("result") or data
+        emp_base = (result.get("empSpxUri") or result.get("empTermsUri") or "").rstrip("/")
+        thinq2_uri = (result.get("thinq2Uri") or "").rstrip("/")
+        if not emp_base:
+            return False, {}, f"Gateway no devolvió empSpxUri: {json.dumps(result)[:300]}"
+        return True, {"empBase": emp_base, "thinq2Uri": thinq2_uri, "raw": result}, "OK"
+
+    @staticmethod
+    def _login(emp_base: str, country: str, username: str, password: str) -> tuple[bool, dict, str]:
+        """POST credentials to LG emp auth endpoint. Returns token dict."""
+        pwd_hash = hashlib.sha512(password.encode("utf-8")).hexdigest()
+        body = {
+            "username": username,
+            "user_auth2": pwd_hash,
+            "type": "EMP",
+            "country": country,
+            "language": "es-419",
+            "spaCode": LGConsumerAuth._APP_CLIENT_ID,
+        }
+        endpoints = [
+            f"{emp_base}/v2.0/authorizeUser",
+            f"{emp_base}/spx/login/sign_in",
+        ]
+        last_detail = ""
+        for url in endpoints:
+            ok, data, detail = LGConsumerAuth._do_request(url, method="POST", body=body, country=country)
+            if ok:
+                token = _deep_get(data, "result", "lgeAccessToken") or _deep_get(data, "result", "access_token") or data.get("access_token") or data.get("lgeAccessToken") or ""
+                refresh = _deep_get(data, "result", "refresh_token") or data.get("refresh_token") or ""
+                code = _deep_get(data, "result", "code") or data.get("code") or ""
+                if token:
+                    return True, {"access_token": token, "refresh_token": refresh, "raw": data}, "OK"
+                if code:
+                    return True, {"auth_code": code, "emp_base": emp_base, "raw": data}, "OK"
+                return False, {}, f"Sin token en respuesta de {url}: {json.dumps(data)[:300]}"
+            last_detail = detail
+        return False, {}, f"Login fallido: {last_detail}"
+
+    @staticmethod
+    def _exchange_code(emp_base: str, country: str, code: str) -> tuple[bool, dict, str]:
+        """Exchange an authorization code for OAuth tokens."""
+        body = {
+            "code": code,
+            "grant_type": "authorization_code",
+            "redirect_uri": "lgaccount.lgsmartthinq:/",
+        }
+        token_url = f"{emp_base}/oauth/1.0/oauth2/token"
+        ok, data, detail = LGConsumerAuth._do_request(token_url, method="POST", body=body, country=country)
+        if ok:
+            token = data.get("access_token") or _deep_get(data, "result", "access_token") or ""
+            refresh = data.get("refresh_token") or _deep_get(data, "result", "refresh_token") or ""
+            if token:
+                return True, {"access_token": token, "refresh_token": refresh}, "OK"
+            return False, {}, f"Sin access_token: {json.dumps(data)[:300]}"
+        return False, {}, detail
+
+    @staticmethod
+    def authenticate(db) -> tuple[bool, str, str, str]:
+        """Full auth flow: gateway → login → tokens.
+        Returns (ok, access_token, thinq2_uri, detail).
+        """
+        import time
+        if db:
+            cached = _load_json_memory_safe(db, LGConsumerAuth._TOKEN_DB_KEY)
+            token = cached.get("access_token", "")
+            thinq2 = cached.get("thinq2Uri", "")
+            expires_at = cached.get("expires_at", 0)
+            if token and thinq2 and expires_at > time.time() + 60:
+                return True, token, thinq2, "OK (cached)"
+
+        country = LGConsumerAuth._country()
+        username = LGConsumerAuth._username()
+        password = LGConsumerAuth._password()
+        if not username or not password:
+            return False, "", "", "LGTHINQ_USERNAME o LGTHINQ_PASSWORD no configurados."
+
+        ok, gw, detail = LGConsumerAuth.get_gateway(country)
+        if not ok:
+            return False, "", "", f"Gateway error: {detail}"
+        emp_base = gw["empBase"]
+        thinq2_uri = gw["thinq2Uri"]
+
+        ok, token_data, detail = LGConsumerAuth._login(emp_base, country, username, password)
+        if not ok:
+            return False, "", "", f"Login error: {detail}"
+
+        access_token = token_data.get("access_token", "")
+        if not access_token and token_data.get("auth_code"):
+            ok, exchanged, detail = LGConsumerAuth._exchange_code(emp_base, country, token_data["auth_code"])
+            if not ok:
+                return False, "", "", f"Token exchange error: {detail}"
+            access_token = exchanged.get("access_token", "")
+
+        if not access_token:
+            return False, "", "", f"No access_token. Respuesta: {json.dumps(token_data)[:300]}"
+
+        if db:
+            try:
+                MemoryService.save_item(db, MemoryCreate(
+                    key=LGConsumerAuth._TOKEN_DB_KEY,
+                    value=json.dumps({
+                        "access_token": access_token,
+                        "refresh_token": token_data.get("refresh_token", ""),
+                        "thinq2Uri": thinq2_uri,
+                        "expires_at": int(time.time()) + 3600,
+                    })
+                ))
+            except Exception:
+                pass
+
+        return True, access_token, thinq2_uri, "OK"
+
+    @staticmethod
+    def start_cycle_consumer(
+        db,
+        device_id: str,
+        cycle_upper: str,
+        cycle_name: str,
+    ) -> tuple[bool, str]:
+        """Start a cycle using consumer token (full app-level API access)."""
+        ok, token, thinq2_uri, detail = LGConsumerAuth.authenticate(db)
+        if not ok:
+            return False, f"Auth consumer falla: {detail}"
+
+        country = LGConsumerAuth._country()
+        api_key = (os.getenv("LGTHINQ_API_KEY") or "v6GFvkweNo7DK7yD3ylIZ9w52aKBU0eJ7wLXkSR3").strip()
+        control_url = f"{thinq2_uri}/devices/{urllib.parse.quote(device_id)}/control"
+
+        payloads = [
+            # Format 1: location + course + operation (full consumer format)
+            {
+                "location": {"locationName": "MAIN"},
+                "course": {"courseName": cycle_name},
+                "operation": {"washerOperationMode": "START"},
+            },
+            # Format 2: select course only (device picks up and starts)
+            {
+                "location": {"locationName": "MAIN"},
+                "course": {"courseName": cycle_name},
+            },
+            # Format 3: ctrlKey/command (older ThinQ v2 format)
+            {
+                "ctrlKey": "basicCtrl",
+                "command": "Set",
+                "dataKey": "Course",
+                "dataValue": cycle_upper,
+            },
+            # Format 4: dataSetList (another ThinQ v2 variant)
+            {
+                "ctrlKey": "courseCtrl",
+                "command": "Set",
+                "dataSetList": {
+                    "washerDryer": {
+                        "courseType": cycle_upper,
+                        "washerOperationMode": "START",
+                    }
+                },
+            },
+        ]
+
+        for payload in payloads:
+            req = urllib.request.Request(
+                control_url,
+                data=json.dumps(payload).encode("utf-8"),
+                method="POST",
+            )
+            req.add_header("Authorization", f"Bearer {token}")
+            req.add_header("Accept", "application/json")
+            req.add_header("Content-Type", "application/json")
+            req.add_header("x-message-id", LGConsumerAuth._msg_id())
+            req.add_header("x-country-code", country)
+            req.add_header("x-client-id", LGConsumerAuth._APP_CLIENT_ID)
+            req.add_header("x-api-key", api_key)
+            req.add_header("x-thinq-app-ver", LGConsumerAuth._APP_VER)
+            req.add_header("x-thinq-app-type", "NUTS")
+            req.add_header("x-thinq-app-os", "ANDROID")
+            req.add_header("x-service-phase", "OP")
+            try:
+                with urllib.request.urlopen(req, timeout=20) as resp:
+                    resp.read()
+                    return True, f"Ciclo {cycle_name} iniciado."
+            except urllib.error.HTTPError as exc:
+                if exc.code == 401:
+                    if db:
+                        try:
+                            MemoryService.save_item(db, MemoryCreate(
+                                key=LGConsumerAuth._TOKEN_DB_KEY, value="{}"
+                            ))
+                        except Exception:
+                            pass
+                    return False, "Token expirado (401). Intenta de nuevo."
+                continue
+            except Exception:
+                continue
+
+        return False, "Consumer API: no se pudo iniciar el ciclo con ningún formato de comando."
+
+
 class LGThinQService:
-    """Simple client for LG ThinQ API using Personal Access Token (PAT)."""
+    """Simple client for LG ThinQ API. Uses PAT for basic ops; uses LGConsumerAuth
+    (email/password) for full cycle control when LGTHINQ_USERNAME is configured."""
 
     ALERT_CONFIG_KEY = "__lgthinq_alert_config__"
     LAST_EVENT_KEY = "__lgthinq_last_event__"
@@ -790,6 +1110,12 @@ class LGThinQService:
             "VACIAR": "Vaciar",
         }
         cycle_name = _LG_COURSE_NAMES.get(cycle_upper, cycle_upper)
+
+        # If consumer credentials are configured, use the full app-level API
+        # which supports cycle selection (unlike the PAT B2B API).
+        if LGConsumerAuth.available():
+            return LGConsumerAuth.start_cycle_consumer(db, device_id, cycle_upper, cycle_name)
+
 
         # Per LG OpenAPI spec: washer command structure requires location + operation + course/cycle fields
         # All payloads include cycle_name to avoid falling back to the device default cycle.

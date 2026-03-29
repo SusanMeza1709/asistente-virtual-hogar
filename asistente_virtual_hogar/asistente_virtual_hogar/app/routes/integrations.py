@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.database.connection import get_db
 from app.services.lgthinq_service import LGThinQService
+from app.services.lgthinq_service import LGThinQService, LGConsumerAuth
 
 router = APIRouter(prefix="/integrations", tags=["Integrations"])
 
@@ -57,4 +58,23 @@ def lgthinq_profile(db: Session = Depends(get_db)):
         "ok": ok,
         "message": detail,
         "profile": profile,
+    }
+
+
+@router.get("/lgthinq/consumer-auth-test")
+def lgthinq_consumer_auth_test(db: Session = Depends(get_db)):
+    """Test consumer authentication (email/password). Returns token status and gateway info."""
+    if not LGConsumerAuth.available():
+        return {
+            "ok": False,
+            "message": "LGTHINQ_USERNAME y LGTHINQ_PASSWORD no están configurados en Render.",
+            "available": False,
+        }
+    ok, token, thinq2_uri, detail = LGConsumerAuth.authenticate(db)
+    return {
+        "ok": ok,
+        "available": True,
+        "message": detail,
+        "thinq2Uri": thinq2_uri if ok else "",
+        "token_preview": (token[:8] + "...") if (ok and token) else "",
     }

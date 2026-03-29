@@ -71,8 +71,12 @@ def _extract_command_text(payload: dict) -> str:
     return ""
 
 
-def _alexa_response(text: str, should_end_session: bool = False) -> dict:
-    return {
+def _alexa_response(
+    text: str,
+    should_end_session: bool = False,
+    reprompt_text: str | None = None,
+) -> dict:
+    response = {
         "version": "1.0",
         "response": {
             "outputSpeech": {
@@ -83,6 +87,16 @@ def _alexa_response(text: str, should_end_session: bool = False) -> dict:
         },
     }
 
+    if not should_end_session and reprompt_text:
+        response["response"]["reprompt"] = {
+            "outputSpeech": {
+                "type": "PlainText",
+                "text": " ".join(reprompt_text.split()),
+            }
+        }
+
+    return response
+
 
 @router.post("/webhook")
 async def alexa_webhook(request: Request, db: Session = Depends(get_db)):
@@ -92,7 +106,8 @@ async def alexa_webhook(request: Request, db: Session = Depends(get_db)):
 
     if request_type == "LaunchRequest":
         return _alexa_response(
-            "Asistente Virtual de Hogar conectado. Dime un comando, por ejemplo: estado de mi lavadora LG."
+            "Asistente Virtual de Hogar conectado. Dime un comando, por ejemplo: estado de mi lavadora LG.",
+            reprompt_text="Sigo aqui. Puedes decir inventario, compras o estado de mi lavadora LG.",
         )
 
     if request_type == "SessionEndedRequest":
@@ -106,14 +121,18 @@ async def alexa_webhook(request: Request, db: Session = Depends(get_db)):
 
     if intent_name == "AMAZON.HelpIntent":
         return _alexa_response(
-            "Puedes pedirme compras, inventario o lavadora LG. Ejemplo: inicia ciclo delicado en la lavadora LG."
+            "Puedes pedirme compras, inventario o lavadora LG. Ejemplo: inicia ciclo delicado en la lavadora LG.",
+            reprompt_text="Que deseas consultar ahora?",
         )
 
     if intent_name in {"AMAZON.StopIntent", "AMAZON.CancelIntent"}:
         return _alexa_response("Listo. Hasta luego.", should_end_session=True)
 
     if intent_name == "AMAZON.FallbackIntent":
-        return _alexa_response("No entendí esa orden. Intenta decirla de otra manera.")
+        return _alexa_response(
+            "No entendí esa orden. Intenta decirla de otra manera.",
+            reprompt_text="Puedes decir: inventario, lista de compras o estado de mi lavadora LG.",
+        )
 
     command_text = _extract_command_text(payload)
     if not command_text:
@@ -121,7 +140,8 @@ async def alexa_webhook(request: Request, db: Session = Depends(get_db)):
 
     if not command_text:
         return _alexa_response(
-            "No detecte el comando. Puedes decir: quiero inventario, necesito ver compras o dime el estado de mi lavadora LG."
+            "No detecte el comando. Puedes decir: quiero inventario, necesito ver compras o dime el estado de mi lavadora LG.",
+            reprompt_text="Sigo escuchando. Dime un comando del hogar.",
         )
 
     try:
@@ -133,4 +153,7 @@ async def alexa_webhook(request: Request, db: Session = Depends(get_db)):
             pass
         reply_text = "Tuve un problema interno procesando tu solicitud. Intenta de nuevo en unos segundos."
 
-    return _alexa_response(reply_text)
+    return _alexa_response(
+        reply_text,
+        reprompt_text="Quieres que haga algo mas? Puedes decir inventario, compras o lavadora LG.",
+    )

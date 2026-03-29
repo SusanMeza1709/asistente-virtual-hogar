@@ -734,15 +734,51 @@ class LGThinQService:
         
         command_path = f"/devices/{urllib.parse.quote(device_id)}/control"
         cycle_upper = str(cycle_type or "NORMAL").upper()
-        
+
+        # Map internal cycle codes to the exact course names LG ThinQ API expects
+        _LG_COURSE_NAMES: dict[str, str] = {
+            "ALGODON": "Algodón",
+            "ECO_40_60": "Eco 40-60",
+            "TURBOWASH_59": "TurboWash 59",
+            "MIXTOS": "Mixtos",
+            "SINTETICO": "Sintético",
+            "ANTIALERGICO": "Antialérgico",
+            "CUIDADO_INFANTIL_CON_VAPOR": "Cuidado Infantil con Vapor",
+            "DELICADO": "Delicado",
+            "LAVADO_A_MANO_LANA": "Lavado a Mano/Lana",
+            "RAPIDO_14": "Rápido 14",
+            "SOLO_SECADO": "Sólo Secado",
+            "LAVADO_SECADO": "Lavado+Secado",
+            "LIMPIEZA_DE_TAMBOR": "Limpieza de Tambor",
+            "DESCARGA_DE_CICLO": "Descarga de Ciclo",
+            "SECADO_NORMAL": "Secado Normal",
+            "SECADO_30_MIN": "Secado 30 min",
+            "SECADO_60_MIN": "Secado 60 min",
+            "SECADO_120_MIN": "Secado 120 min",
+            "SECADO_PLANCHADO": "Secado Planchado",
+            "SECADO_TEMPERATURA_BAJA": "Secado Temperatura Baja",
+            "SECADO_NORMAL_ECO": "Secado Normal Eco",
+            "ROPA_DE_CAMA": "Ropa de cama",
+            "CENTRIFUGADO": "Centrifugado",
+            "CUIDADO_DEL_BEBE": "Cuidado del Bebé",
+            "DESODORIZACION": "Desodorización",
+            "JEANS": "Jeans",
+            "LENCERIA": "Lencería",
+            "MANCHA_DE_SUDOR": "Mancha de Sudor",
+            "MANCHAS_DE_COMIDA_Y_JUGO": "Manchas de Comida y Jugo",
+            "TEMPORADA_DE_LLUVIAS": "Temporada de Lluvias",
+            "VACIAR": "Vaciar",
+        }
+        cycle_name = _LG_COURSE_NAMES.get(cycle_upper, cycle_upper)
+
         # Per LG OpenAPI spec: washer command structure requires location + operation + course/cycle fields
         # Try multiple variations to accommodate different device types.
         payloads = [
-            # Washer format with location + operation + course
+            # Washer format with location + operation + course (display name)
             {
                 "location": {"locationName": "MAIN"},
                 "operation": {"washerOperationMode": "START"},
-                "course": {"courseName": cycle_upper}
+                "course": {"courseName": cycle_name}
             },
             # Simpler format: location + operation
             {
@@ -752,7 +788,7 @@ class LGThinQService:
             # Alternative: without location (for devices that might not need it)
             {
                 "operation": {"washerOperationMode": "START"},
-                "course": {"courseName": cycle_upper}
+                "course": {"courseName": cycle_name}
             },
             # Dryer/other format
             {

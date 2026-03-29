@@ -482,6 +482,26 @@ class LGThinQService:
         return True, raw, "OK"
 
     @staticmethod
+    def get_device_profile(db: Session | None = None, device_id: str | None = None) -> tuple[bool, dict, str]:
+        """Return the raw device profile from LG ThinQ API (for diagnostics)."""
+        if not device_id:
+            ok, devices, detail = LGThinQService.list_devices(db)
+            if not ok or not devices:
+                return False, {}, detail
+            device_id = str(devices[0].get("id", "")).strip()
+
+        profile_paths = [
+            f"/devices/{urllib.parse.quote(device_id)}/profile",
+            f"/v1/devices/{urllib.parse.quote(device_id)}/profile",
+            f"/devices/{urllib.parse.quote(device_id)}/control-range",
+        ]
+        for path in profile_paths:
+            ok, payload, detail = LGThinQService._request_json(path, db=db)
+            if ok and payload:
+                return True, payload if isinstance(payload, dict) else {"raw": payload}, "OK"
+        return False, {}, "No se pudo obtener el perfil del dispositivo."
+
+    @staticmethod
     def _pick_device(devices: list[dict], preferred_name: str | None = None) -> dict | None:
         if not devices:
             return None
@@ -772,7 +792,7 @@ class LGThinQService:
         cycle_name = _LG_COURSE_NAMES.get(cycle_upper, cycle_upper)
 
         # Per LG OpenAPI spec: washer command structure requires location + operation + course/cycle fields
-        # Try multiple variations to accommodate different device types.
+        # All payloads include cycle_name to avoid falling back to the device default cycle.
         payloads = [
             # Washer format with location + operation + course (display name)
             {
@@ -780,20 +800,16 @@ class LGThinQService:
                 "operation": {"washerOperationMode": "START"},
                 "course": {"courseName": cycle_name}
             },
-            # Simpler format: location + operation
-            {
-                "location": {"locationName": "MAIN"},
-                "operation": {"washerOperationMode": "START"}
-            },
             # Alternative: without location (for devices that might not need it)
             {
                 "operation": {"washerOperationMode": "START"},
                 "course": {"courseName": cycle_name}
             },
-            # Dryer/other format
+            # Dryer/other format with course
             {
                 "location": {"locationName": "MAIN"},
-                "operation": {"dryerOperationMode": "START"}
+                "operation": {"dryerOperationMode": "START"},
+                "course": {"courseName": cycle_name}
             },
         ]
 

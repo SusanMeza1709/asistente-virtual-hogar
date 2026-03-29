@@ -47,3 +47,14 @@ def lgthinq_poll(device: str | None = Query(default=None), db: Session = Depends
         "message": detail,
         "event": event,
     }
+
+
+@router.get("/lgthinq/profile")
+def lgthinq_profile(db: Session = Depends(get_db)):
+    """Return the raw device profile to inspect available course codes and command formats."""
+    ok, profile, detail = LGThinQService.get_device_profile(db)
+    return {
+        "ok": ok,
+        "message": detail,
+        "profile": profile,
+    }

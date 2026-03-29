@@ -926,7 +926,7 @@ class ChatService:
                 MemoryService.save_item(db, MemoryCreate(key="__pending_create__", value=json.dumps(_PENDING)))
             except Exception:
                 pass
-            return f"Perfecto. Seleccioné el ciclo {cycle_label}. ¿Quieres que lo inicie ahora? Responde sí o no."
+            return f"Perfecto. Antes de iniciar, asegúrate de que la perilla de la lavadora esté en {cycle_label}. Cuando esté lista, responde sí para comenzar."
 
         if asks_connect:
             return (

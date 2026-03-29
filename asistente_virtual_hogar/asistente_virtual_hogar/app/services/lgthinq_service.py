@@ -1190,6 +1190,11 @@ class LGThinQService:
                 "operation": {"dryerOperationMode": "START"},
                 "course": {"courseName": cycle_name}
             },
+            # Last resort for models that only accept operation start (no course selection).
+            {
+                "location": {"locationName": "MAIN"},
+                "operation": {"washerOperationMode": "START"}
+            },
         ]
 
         last_error = None

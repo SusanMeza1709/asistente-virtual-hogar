@@ -1967,11 +1967,18 @@ class ChatService:
                 differs_from_panel = bool(
                     current_course and ChatService._normalize(current_course) != ChatService._normalize(cycle_label)
                 )
+                remote_start_prompted = bool(pending.get("remote_start_prompted"))
 
                 # Some models do not expose current selected course in status.
                 # For special cycles, enforce Remote Start guidance even when panel cycle is unknown.
-                if differs_from_panel or (requested_is_special_cycle and not current_course):
+                if (not remote_start_prompted) and (differs_from_panel or (requested_is_special_cycle and not current_course)):
                     panel_label = current_course or "el ciclo del panel manual"
+                    _PENDING["remote_start_prompted"] = True
+                    try:
+                        import json
+                        MemoryService.save_item(db, MemoryCreate(key="__pending_create__", value=json.dumps(_PENDING)))
+                    except Exception:
+                        pass
                     return (
                         f"Activaste un ciclo diferente al manual. "
                         f"El panel está en {panel_label} y pediste {cycle_label}. "

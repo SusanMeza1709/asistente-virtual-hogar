@@ -1217,7 +1217,7 @@ class LGThinQService:
                 try:
                     with urllib.request.urlopen(request, timeout=20) as response:
                         response.read()
-                        return True, f"Ciclo {cycle_upper} iniciado en SujiLavadora."
+                        return True, "Lavadora iniciada de forma remota. El ciclo activo depende de la perilla o selección física del panel."
                 except urllib.error.HTTPError as exc:
                     body = ""
                     try:

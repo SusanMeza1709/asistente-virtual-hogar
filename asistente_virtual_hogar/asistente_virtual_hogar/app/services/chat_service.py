@@ -1973,10 +1973,12 @@ class ChatService:
                 # For special cycles, enforce Remote Start guidance even when panel cycle is unknown.
                 if (not remote_start_prompted) and (differs_from_panel or (requested_is_special_cycle and not current_course)):
                     panel_label = current_course or "el ciclo del panel manual"
-                    _PENDING["remote_start_prompted"] = True
+                    pending["remote_start_prompted"] = True
+                    _PENDING.clear()
+                    _PENDING.update(pending)
                     try:
                         import json
-                        MemoryService.save_item(db, MemoryCreate(key="__pending_create__", value=json.dumps(_PENDING)))
+                        MemoryService.save_item(db, MemoryCreate(key="__pending_create__", value=json.dumps(pending)))
                     except Exception:
                         pass
                     return (
